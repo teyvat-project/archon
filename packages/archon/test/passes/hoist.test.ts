@@ -205,7 +205,7 @@ describe('hoistInlineSchemas', () => {
     );
   });
 
-  it('fills the mapping even when the discriminator value is an enum hoisted away (enums=true)', () => {
+  it('keeps the discriminator property inline (not hoisted) even with enums=true', () => {
     const ir = doc({
       Pet: union(
         [obj({ kind: tag('dog') }), obj({ kind: tag('cat') })],
@@ -213,10 +213,32 @@ describe('hoistInlineSchemas', () => {
       ),
     });
     hoistInlineSchemas(ir, both);
+    expect([...ir.schemas.keys()]).toEqual(['Pet', 'PetDog', 'PetCat']);
+    expect(prop(ir.schemas.get('PetCat'), 'kind')).toEqual(tag('cat'));
+    expect(prop(ir.schemas.get('PetDog'), 'kind')).toEqual(tag('dog'));
     const pet = ir.schemas.get('Pet');
     expect(pet?.kind === 'union' && pet.discriminator?.mapping).toEqual(
       new Map([['cat', 'PetCat'], ['dog', 'PetDog']]),
     );
+  });
+
+  it('still hoists other enums (including single-value ones) inside discriminated variants', () => {
+    const ir = doc({
+      Pet: union(
+        [obj({ kind: tag('dog'), mode: tag('only') }), obj({ kind: tag('cat'), size: tag('s', 'l') })],
+        { discriminator: { property: 'kind', mapping: new Map([['cat', ''], ['dog', '']]) } },
+      ),
+    });
+    hoistInlineSchemas(ir, both);
+    expect([...ir.schemas.keys()]).toEqual(['Pet', 'PetDog', 'PetDogMode', 'PetCat', 'PetCatSize']);
+    expect(prop(ir.schemas.get('PetDog'), 'kind')).toEqual(tag('dog'));
+    expect(prop(ir.schemas.get('PetDog'), 'mode')).toEqual(ref('PetDogMode'));
+  });
+
+  it('hoists a non-discriminator single-value enum when enums=true', () => {
+    const ir = doc({ Box: obj({ version: tag('v1') }) });
+    hoistInlineSchemas(ir, both);
+    expect([...ir.schemas.keys()]).toEqual(['Box', 'BoxVersion']);
   });
 
   it('suffixes conflicting names with 2, 3…', () => {
@@ -397,5 +419,25 @@ describe('hoistInlineSchemas', () => {
     });
     expect(ir.schemas.get('UserProfileEmojiStandard')?.kind).toBe('object');
     expect(ir.schemas.get('UserProfileEmojiCustom')?.kind).toBe('object');
+  });
+
+  it('does not hoist the natsuneko profileEmoji discriminator enum with enums=true', () => {
+    const raw = JSON.parse(
+      readFileSync(new URL('../../../../fixtures/specs/natsuneko.json', import.meta.url), 'utf8'),
+    ) as OpenAPIDocument;
+    const ir = parseDocument(raw, { diagnostics: new Diagnostics() });
+    inferDiscriminators(ir);
+    hoistInlineSchemas(ir, { objects: true, enums: true });
+
+    expect([...ir.schemas.keys()].filter((n) => /^UserProfileEmoji.*Type$/.test(n))).toEqual([]);
+    expect(prop(ir.schemas.get('UserProfileEmojiStandard'), 'type')).toMatchObject({ kind: 'enum', values: ['standard'] });
+    expect(prop(ir.schemas.get('UserProfileEmojiCustom'), 'type')).toMatchObject({ kind: 'enum', values: ['custom'] });
+    const emoji = prop(ir.schemas.get('User'), 'profileEmoji');
+    expect(emoji?.kind === 'union' && emoji.discriminator?.mapping).toEqual(
+      new Map([
+        ['standard', 'UserProfileEmojiStandard'],
+        ['custom', 'UserProfileEmojiCustom'],
+      ]),
+    );
   });
 });

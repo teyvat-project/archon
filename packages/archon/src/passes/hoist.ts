@@ -55,18 +55,21 @@ export function hoistInlineSchemas(ir: IRDocument, opts: HoistOptions): void {
     (opts.objects && s.kind === 'object' && s.properties.length > 0) || (opts.enums && s.kind === 'enum');
 
   /** `name` はこの位置の提案名（hoist されなければ子の命名の親名としてそのまま使う）。 */
-  function walk(schema: IRSchema, path: SchemaPath, name: string): IRSchema {
-    if (!shouldHoist(schema)) return children(schema, path, name);
+  function walk(schema: IRSchema, path: SchemaPath, name: string, inlineProps?: ReadonlySet<string>): IRSchema {
+    if (!shouldHoist(schema)) return children(schema, path, name, inlineProps);
 
     const finalName = namer.claim(opts.nameHook?.(path, { suggested: name }) ?? name);
     // 親を先に登録して、子より前の位置を確保する
     ir.schemas.set(finalName, schema);
-    ir.schemas.set(finalName, namedSchema(children(schema, path, finalName)));
+    ir.schemas.set(finalName, namedSchema(children(schema, path, finalName, inlineProps)));
     return usageRef(schema, finalName);
   }
 
-  /** `schema` 自体は巻き上げず、直接の子だけを処理する。 */
-  function children(schema: IRSchema, path: SchemaPath, name: string): IRSchema {
+  /**
+   * `schema` 自体は巻き上げず、直接の子だけを処理する。
+   * `inlineProps` に含まれる object プロパティは巻き上げずに inline のまま残す（判別プロパティ用）。
+   */
+  function children(schema: IRSchema, path: SchemaPath, name: string, inlineProps?: ReadonlySet<string>): IRSchema {
     const at = (child: IRSchema, segments: string[], childName: string) =>
       walk(child, [...path, ...segments], childName);
 
@@ -80,7 +83,7 @@ export function hoistInlineSchemas(ir: IRDocument, opts: HoistOptions): void {
       case 'object': {
         const properties = schema.properties.map((p) => ({
           ...p,
-          schema: at(p.schema, ['properties', p.name], `${name}${pascal(p.name)}`),
+          schema: inlineProps?.has(p.name) ? p.schema : at(p.schema, ['properties', p.name], `${name}${pascal(p.name)}`),
         }));
         const { additionalProperties } = schema;
         return additionalProperties
@@ -111,7 +114,9 @@ export function hoistInlineSchemas(ir: IRDocument, opts: HoistOptions): void {
       // 判別値は、プロパティが巻き上げられる前の variant から読む
       const tag = discriminator && variant.kind === 'object' ? tagOf(variant, discriminator.property) : undefined;
       const suffix = tag !== undefined && pascal(tag) !== '' ? pascal(tag) : `Variant${i + 1}`;
-      const next = walk(variant, [...path, 'variants', String(i)], `${name}${suffix}`);
+      // 判別プロパティ（単一値 enum / const）は inline のまま残す
+      const inlineProps = tag !== undefined && discriminator ? new Set([discriminator.property]) : undefined;
+      const next = walk(variant, [...path, 'variants', String(i)], `${name}${suffix}`, inlineProps);
       if (mapping && tag !== undefined && next.kind === 'ref' && variant.kind !== 'ref' && mapping.get(tag) === '') {
         mapping.set(tag, next.name);
       }
