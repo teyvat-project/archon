@@ -5,7 +5,7 @@
   "packageManager": "pnpm@10.12.1",
   "scripts": {
     "test": "vitest run",
-    "test:e2e": "pnpm -F @archon/e2e-typescript test",
+    "test:e2e": "pnpm -F @natsuneko-laboratory/archon-e2e-typescript test",
     "typecheck": "pnpm -r typecheck",
     "build": "pnpm -r build"
   },

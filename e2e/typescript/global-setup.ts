@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
-import { startMockServer } from '@archon/e2e-mock-server';
-import { generate } from 'archon';
-import { typescript } from 'archon/plugins';
+import { startMockServer } from '@natsuneko-laboratory/archon-e2e-mock-server';
+import { generate } from '@natsuneko-laboratory/archon';
+import { typescript } from '@natsuneko-laboratory/archon/plugins';
 import type { TestProject } from 'vitest/node';
 
 declare module 'vitest' {

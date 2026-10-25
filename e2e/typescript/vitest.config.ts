@@ -5,10 +5,10 @@ const archonSource = (file: string) => fileURLToPath(new URL(`../../packages/arc
 
 export default defineConfig({
   resolve: {
-    // `archon` is consumed from source so the suite needs no build step.
+    // `@natsuneko-laboratory/archon` is consumed from source so the suite needs no build step.
     alias: [
-      { find: /^archon$/, replacement: archonSource('index.ts') },
-      { find: /^archon\/plugins$/, replacement: archonSource('plugins.ts') },
+      { find: /^@natsuneko-laboratory\/archon$/, replacement: archonSource('index.ts') },
+      { find: /^@natsuneko-laboratory\/archon\/plugins$/, replacement: archonSource('plugins.ts') },
     ],
   },
   test: {

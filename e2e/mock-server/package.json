@@ -1,5 +1,5 @@
 {
-  "name": "@archon/e2e-mock-server",
+  "name": "@natsuneko-laboratory/archon-e2e-mock-server",
   "version": "0.0.0",
   "private": true,
   "type": "module",

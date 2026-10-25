@@ -1,5 +1,5 @@
 {
-  "name": "archon",
+  "name": "@natsuneko-laboratory/archon",
   "version": "0.1.0",
   "type": "module",
   "bin": {

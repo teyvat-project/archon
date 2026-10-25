@@ -1,5 +1,5 @@
 {
-  "name": "@archon/runtime-typescript",
+  "name": "@natsuneko-laboratory/archon-runtime-typescript",
   "version": "0.1.0",
   "private": true,
   "type": "module",

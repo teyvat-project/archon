@@ -69,9 +69,9 @@ describe('typescript plugin: vendored runtime', () => {
   it('resolveRuntimeDir uses only the packaged runtimes when loaded from dist', () => {
     const root = mkdtempSync(join(tmpdir(), 'archon-dist-'));
     try {
-      // <project>/node_modules/archon/dist/plugins.js。<pkgRoot>/../.. に無関係な runtimes がある
+      // <project>/node_modules/@natsuneko-laboratory/archon/dist/plugins.js。<pkgRoot>/../.. に無関係な runtimes がある
       const project = join(root, 'project');
-      const pkg = join(project, 'node_modules', 'archon');
+      const pkg = join(project, 'node_modules', '@natsuneko-laboratory', 'archon');
       mkdirSync(join(pkg, 'dist'), { recursive: true });
       mkdirSync(join(pkg, 'runtimes', 'typescript', 'src'), { recursive: true });
       mkdirSync(join(project, 'runtimes', 'typescript', 'src'), { recursive: true });

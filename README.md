@@ -12,10 +12,10 @@ npm にはまだ公開していません。当面はこのリポジトリのワ�
 
 ```sh
 pnpm install
-pnpm -F archon build   # CLI (packages/archon/dist/cli.js) を作る
+pnpm -F @natsuneko-laboratory/archon build   # CLI (packages/archon/dist/cli.js) を作る
 ```
 
-公開後は `pnpm add -D archon` で利用する想定です。
+公開後は `pnpm add -D @natsuneko-laboratory/archon` で利用する想定です。
 
 ## 使い方
 
@@ -30,7 +30,7 @@ archon generate --strict            # 警告が 1 件でもあれば何も書き
 archon generate --verbose           # info レベルの診断（命名衝突の改名など）も表示する
 ```
 
-ワークスペース内では（先に `pnpm -F archon build` が必要）、`examples/natsuneko` のように `archon` を devDependency に持つパッケージから `pnpm exec archon generate` で実行できます。
+ワークスペース内では（先に `pnpm -F @natsuneko-laboratory/archon build` が必要）、`examples/natsuneko` のように `@natsuneko-laboratory/archon` を devDependency に持つパッケージから `pnpm exec archon generate` で実行できます。
 
 ```sh
 cd examples/natsuneko && pnpm exec archon generate   # → examples/natsuneko/sdk/ts/
@@ -41,8 +41,8 @@ cd examples/natsuneko && pnpm exec archon generate   # → examples/natsuneko/sd
 `archon.config.ts`（ローダーは jiti）。配列を `defineConfig([a, b])` に渡すと複数ジョブになります。
 
 ```ts
-import { defineConfig } from 'archon';
-import { typescript } from 'archon/plugins';
+import { defineConfig } from '@natsuneko-laboratory/archon';
+import { typescript } from '@natsuneko-laboratory/archon/plugins';
 
 export default defineConfig({
   input: 'https://api.natsuneko.com/openapi.json', // パス | URL | { path, headers? } | OpenAPI オブジェクト
@@ -218,9 +218,9 @@ Browser / Node.js 18+ / Bun / Deno / React Native / Cloudflare Workers（ESM の
 `definePlugin` で作ります。依存プラグイン（ここでは `typescript`）の公開 API `symbols` から、生成済みの型名・関数名を参照できます。
 
 ```ts
-import { defineConfig, definePlugin } from 'archon';
-import { typescript } from 'archon/plugins';
-import type { TypeScriptPluginAPI } from 'archon/plugins';
+import { defineConfig, definePlugin } from '@natsuneko-laboratory/archon';
+import { typescript } from '@natsuneko-laboratory/archon/plugins';
+import type { TypeScriptPluginAPI } from '@natsuneko-laboratory/archon/plugins';
 
 const operationList = definePlugin<{ output: string }>({
   name: 'operation-list',

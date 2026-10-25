@@ -35,8 +35,8 @@ const KNOWN_SPEC_MISMATCHES: Record<string, string> = {
 const { createJiti } = createRequire(repoPath('packages/archon/package.json'))('jiti') as typeof import('jiti');
 const jiti = createJiti(import.meta.url, {
   alias: {
-    'archon/plugins': repoPath('packages/archon/src/plugins.ts'),
-    archon: repoPath('packages/archon/src/index.ts'),
+    '@natsuneko-laboratory/archon/plugins': repoPath('packages/archon/src/plugins.ts'),
+    '@natsuneko-laboratory/archon': repoPath('packages/archon/src/index.ts'),
   },
 });
 
@@ -46,8 +46,8 @@ const { loadInput } = await jiti.import<typeof import('../packages/archon/src/lo
 );
 
 const exampleDir = repoPath('examples/natsuneko');
-// Loaded through our aliased jiti so the config's `archon` / `archon/plugins` imports resolve to the sources
-// (the package entry points need a prior `pnpm -F archon build`).
+// Loaded through our aliased jiti so the config's `@natsuneko-laboratory/archon` / `@natsuneko-laboratory/archon/plugins` imports resolve to the sources
+// (the package entry points need a prior `pnpm -F @natsuneko-laboratory/archon build`).
 const userConfig = await jiti.import<UserConfig>(join(exampleDir, 'archon.config.ts'), { default: true });
 
 const outDir = await mkdtemp(join(tmpdir(), 'archon-live-smoke-'));

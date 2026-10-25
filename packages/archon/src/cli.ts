@@ -10,8 +10,8 @@ import type { Diagnostic } from './diagnostics.js';
 import { generate } from './generate.js';
 import { version } from './index.js';
 
-const CONFIG_TEMPLATE = `import { defineConfig } from 'archon';
-import { typescript } from 'archon/plugins';
+const CONFIG_TEMPLATE = `import { defineConfig } from '@natsuneko-laboratory/archon';
+import { typescript } from '@natsuneko-laboratory/archon/plugins';
 
 export default defineConfig({
   input: './openapi.yaml',

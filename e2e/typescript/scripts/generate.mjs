@@ -5,7 +5,7 @@ import { createJiti } from 'jiti';
 const archonSource = (file) => fileURLToPath(new URL(`../../../packages/archon/src/${file}`, import.meta.url));
 
 const jiti = createJiti(import.meta.url, {
-  alias: { 'archon/plugins': archonSource('plugins.ts'), archon: archonSource('index.ts') },
+  alias: { '@natsuneko-laboratory/archon/plugins': archonSource('plugins.ts'), '@natsuneko-laboratory/archon': archonSource('index.ts') },
 });
 const { generateSdks } = await jiti.import('../global-setup.ts');
 await generateSdks();

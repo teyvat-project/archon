@@ -116,8 +116,8 @@ describe('cli init', () => {
   it('writes template and refuses overwrite', async () => {
     expect(await runCli(argv('init'))).toBe(0);
     const text = await readFile(join(dir, 'archon.config.ts'), 'utf8');
-    expect(text).toContain(`import { defineConfig } from 'archon';`);
-    expect(text).toContain(`import { typescript } from 'archon/plugins';`);
+    expect(text).toContain(`import { defineConfig } from '@natsuneko-laboratory/archon';`);
+    expect(text).toContain(`import { typescript } from '@natsuneko-laboratory/archon/plugins';`);
     expect(text).toContain(`input: './openapi.yaml'`);
     expect(text).toContain('plugins: [typescript()]');
 

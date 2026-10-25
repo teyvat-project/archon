@@ -44,7 +44,7 @@ Bearer Token / BASIC Auth / OAuth2（+ openIdConnect）/ API Key（header / quer
 
 ### 2.1 名称と配布
 
-- 名称: **Archon**。npm パッケージ `archon`（名称は公開前に再検討可）。
+- 名称: **Archon**。npm パッケージ `@natsuneko-laboratory/archon`（CLI コマンド名は `archon`）。
 - CLI: `archon generate [-c archon.config.ts] [--plugin <name>] [--strict] [--verbose]`、`archon init`。
 - Meta SDK 本体は TypeScript で実装し、依存ライブラリの使用は自由。
 
@@ -196,8 +196,8 @@ interface IRResponse { status: number | string; description?: string; headers: M
 `archon.config.ts`（`.mts` / `.mjs` / `.js` / `.json` も可、ローダーは jiti）。
 
 ```ts
-import { defineConfig } from 'archon';
-import { typescript, csharp, kotlin, swift, rust, go } from 'archon/plugins';
+import { defineConfig } from '@natsuneko-laboratory/archon';
+import { typescript, csharp, kotlin, swift, rust, go } from '@natsuneko-laboratory/archon/plugins';
 
 export default defineConfig({
   input: 'https://api.natsuneko.com/openapi.json',  // string | { path, headers? } | OpenAPI object
@@ -258,7 +258,7 @@ export default defineConfig({
 ### 5.3 カスタムプラグイン API
 
 ```ts
-import { definePlugin } from 'archon';
+import { definePlugin } from '@natsuneko-laboratory/archon';
 
 export const myPlugin = definePlugin<MyOptions>({
   name: 'my-plugin',

@@ -29,15 +29,15 @@ importers:
 
   e2e/typescript:
     devDependencies:
-      '@archon/e2e-mock-server':
+      '@natsuneko-laboratory/archon':
+        specifier: workspace:*
+        version: link:../../packages/archon
+      '@natsuneko-laboratory/archon-e2e-mock-server':
         specifier: workspace:*
         version: link:../mock-server
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
-      archon:
-        specifier: workspace:*
-        version: link:../../packages/archon
       jiti:
         specifier: ^2.7.0
         version: 2.7.0
@@ -50,7 +50,7 @@ importers:
 
   examples/natsuneko:
     devDependencies:
-      archon:
+      '@natsuneko-laboratory/archon':
         specifier: workspace:*
         version: link:../../packages/archon
 

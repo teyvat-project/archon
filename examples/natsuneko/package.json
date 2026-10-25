@@ -1,5 +1,5 @@
 {
-  "name": "@archon/example-natsuneko",
+  "name": "@natsuneko-laboratory/archon-example-natsuneko",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -7,6 +7,6 @@
     "generate": "archon generate"
   },
   "devDependencies": {
-    "archon": "workspace:*"
+    "@natsuneko-laboratory/archon": "workspace:*"
   }
 }

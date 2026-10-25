@@ -1,5 +1,5 @@
 {
-  "name": "@archon/e2e-typescript",
+  "name": "@natsuneko-laboratory/archon-e2e-typescript",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,9 +8,9 @@
     "typecheck": "node scripts/generate.mjs && tsc --noEmit -p ."
   },
   "devDependencies": {
-    "@archon/e2e-mock-server": "workspace:*",
+    "@natsuneko-laboratory/archon-e2e-mock-server": "workspace:*",
     "@types/node": "^24.19.2",
-    "archon": "workspace:*",
+    "@natsuneko-laboratory/archon": "workspace:*",
     "jiti": "^2.7.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.7"
