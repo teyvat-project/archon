@@ -41,7 +41,6 @@ export class OAuth2TokenManager {
   private readonly cache = new Map<string, TokenSet>();
   private readonly inflight = new Map<string, Promise<TokenSet>>();
   private refreshToken: string | undefined;
-  private generation = 0;
 
   constructor(opts: OAuth2TokenManagerOptions) {
     this.fetchImpl = opts.fetch;
@@ -63,17 +62,14 @@ export class OAuth2TokenManager {
 
     let pending = this.inflight.get(key);
     if (!pending) {
-      const generation = this.generation;
       pending = this.fetchToken(requested).then(
         (tokens) => {
-          if (generation === this.generation) {
-            this.cache.set(key, tokens);
-            this.inflight.delete(key);
-          }
+          this.cache.set(key, tokens);
+          this.inflight.delete(key);
           return tokens;
         },
         (error: unknown) => {
-          if (generation === this.generation) this.inflight.delete(key);
+          this.inflight.delete(key);
           throw error;
         },
       );
@@ -82,11 +78,16 @@ export class OAuth2TokenManager {
     return (await pending).accessToken;
   }
 
-  /** Drops every cached token and detaches in-flight requests so the next `getToken` fetches anew. */
-  invalidate(): void {
-    this.generation++;
-    this.cache.clear();
-    this.inflight.clear();
+  /**
+   * Drops cached tokens so the next `getToken` fetches a new one. With `rejectedToken` (a token the server
+   * refused) only entries holding that exact token are dropped, so a caller holding a stale token cannot
+   * discard a newer one. In-flight fetches are never detached: they always yield a newer token, and joining
+   * them keeps refresh grants single-flight.
+   */
+  invalidate(rejectedToken?: string): void {
+    for (const [key, tokens] of this.cache) {
+      if (rejectedToken === undefined || tokens.accessToken === rejectedToken) this.cache.delete(key);
+    }
   }
 
   private isFresh(tokens: TokenSet): boolean {

@@ -160,6 +160,12 @@ describe('createAuthMiddleware', () => {
     expect(t2.seen[0]!.headers.get('cookie')).toBe('a=1; sid=abc');
   });
 
+  it('percent-encodes the apiKey cookie value so it cannot inject cookie pairs', async () => {
+    const t = setup({ auth: { keyCookie: 'a; admin=1,b' } }, [req_('keyCookie')]);
+    await t.mw(makeReq(), t.next, t.ctx);
+    expect(t.seen[0]!.headers.get('cookie')).toBe('sid=a%3B%20admin%3D1%2Cb');
+  });
+
   it('is idempotent for query and cookie keys on re-entry with the same request', async () => {
     const t = setup({ auth: { keyQuery: 'k', keyCookie: 'c' } }, [
       [
@@ -321,6 +327,22 @@ describe('createAuthMiddleware', () => {
       expect(server.calls).toHaveLength(2);
       // the first 401 body was cancelled/drained before retrying
       expect(bodies[0]!.bodyUsed).toBe(true);
+    });
+
+    it('N parallel 401s with the same stale token trigger exactly one extra token request', async () => {
+      const server = tokenServer(['stale', 'fresh']);
+      const t = setup({ auth: { oauth: { clientCredentials: cc } }, fetch: server.fetch }, [req_('oauth')]);
+      await t.mw(makeReq(), t.next, t.ctx); // primes the cache with 'stale'
+      const seenAuth: (string | null)[] = [];
+      const next: Next = async (r: ApiRequest) => {
+        const auth = r.headers.get('authorization');
+        seenAuth.push(auth);
+        return new Response('', { status: auth === 'Bearer fresh' ? 200 : 401 });
+      };
+      const results = await Promise.all([0, 1, 2, 3, 4].map(() => t.mw(makeReq(), next, t.ctx)));
+      expect(results.map((r) => r.status)).toEqual([200, 200, 200, 200, 200]);
+      expect(server.calls).toHaveLength(2);
+      expect(seenAuth.filter((a) => a === 'Bearer fresh')).toHaveLength(5);
     });
 
     it('retries at most once', async () => {

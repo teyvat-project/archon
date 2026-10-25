@@ -101,13 +101,13 @@ export function createAuthMiddleware(getConfig: () => ClientConfig<any>): Middle
     return manager;
   }
 
-  /** Applies the requirement to `req`; returns the managers whose tokens were used. */
+  /** Applies the requirement to `req`; returns each manager used with the token it supplied. */
   async function apply(
     config: ClientConfig<any>,
     requirement: SecurityRequirement,
     req: ApiRequest,
-  ): Promise<OAuth2TokenManager[]> {
-    const used: OAuth2TokenManager[] = [];
+  ): Promise<{ manager: OAuth2TokenManager; token: string }[]> {
+    const used: { manager: OAuth2TokenManager; token: string }[] = [];
     for (const { scheme, scopes } of requirement) {
       const spec = config.securitySchemes[scheme]!;
       const value = (config.auth as Record<string, AuthEntry>)[scheme];
@@ -126,7 +126,7 @@ export function createAuthMiddleware(getConfig: () => ClientConfig<any>): Middle
           const key = await resolveValue(value as TokenValue);
           if (spec.in === 'header') req.headers.set(spec.name, key);
           else if (spec.in === 'query') setQueryParam(req.url, spec.name, key);
-          else setCookie(req.headers, spec.name, key);
+          else setCookie(req.headers, spec.name, encodeURIComponent(key));
           break;
         }
         case 'oauth2':
@@ -138,7 +138,7 @@ export function createAuthMiddleware(getConfig: () => ClientConfig<any>): Middle
           } else {
             const manager = managerFor(config, scheme, spec, oauth);
             token = await manager.getToken(scopes);
-            used.push(manager);
+            used.push({ manager, token });
           }
           req.headers.set('Authorization', `Bearer ${token}`);
           break;
@@ -162,12 +162,12 @@ export function createAuthMiddleware(getConfig: () => ClientConfig<any>): Middle
       sent = used;
       return req;
     };
-    let sent: OAuth2TokenManager[] = [];
+    let sent: { manager: OAuth2TokenManager; token: string }[] = [];
 
     let response = await next(await send());
     if (response.status === 401 && sent.length > 0 && req.replayable) {
       await response.body?.cancel().catch(() => undefined);
-      for (const manager of sent) manager.invalidate();
+      for (const { manager, token } of sent) manager.invalidate(token);
       response = await next(await send());
     }
     return response;

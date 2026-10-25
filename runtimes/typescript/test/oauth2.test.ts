@@ -189,21 +189,61 @@ describe('OAuth2TokenManager', () => {
     expect(calls).toHaveLength(2);
   });
 
-  it('invalidate() discards a token fetch that was already in flight', async () => {
+  it('invalidate(rejectedToken) only drops a cache entry holding that token', async () => {
+    const { fetch, calls } = tokenFetch((_c, n) => json({ access_token: `tok${n}` }));
+    const m = new OAuth2TokenManager({ fetch, config: { clientCredentials: cc }, tokenUrl: 'https://auth.test/token' });
+    await expect(m.getToken([])).resolves.toBe('tok1');
+    m.invalidate('some-other-token');
+    await expect(m.getToken([])).resolves.toBe('tok1');
+    expect(calls).toHaveLength(1);
+    m.invalidate('tok1');
+    await expect(m.getToken([])).resolves.toBe('tok2');
+    expect(calls).toHaveLength(2);
+  });
+
+  it('invalidate() does not detach an in-flight fetch; later callers join it', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     const { fetch, calls } = tokenFetch(async (_c, n) => {
-      if (n === 1) await gate;
+      await gate;
       return json({ access_token: `tok${n}` });
     });
     const m = new OAuth2TokenManager({ fetch, config: { clientCredentials: cc }, tokenUrl: 'https://auth.test/token' });
     const first = m.getToken([]);
+    m.invalidate('stale');
     m.invalidate();
-    await expect(m.getToken([])).resolves.toBe('tok2');
+    const second = m.getToken([]);
     release();
-    await first;
-    await expect(m.getToken([])).resolves.toBe('tok2');
+    await expect(Promise.all([first, second])).resolves.toEqual(['tok1', 'tok1']);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('refresh flow: concurrent invalidate + getToken yields one grant and keeps the latest refresh token', async () => {
+    const onRefreshed = vi.fn<(t: TokenSet) => void>();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { fetch, calls } = tokenFetch(async (_c, n) => {
+      if (n > 1) await gate;
+      return json({ access_token: `at${n}`, refresh_token: `rt${n}` });
+    });
+    const m = new OAuth2TokenManager({
+      fetch,
+      config: { refreshToken: { refreshToken: 'rt0', clientId: 'id', onRefreshed } },
+      tokenUrl: 'https://auth.test/refresh',
+    });
+    await expect(m.getToken([])).resolves.toBe('at1');
+    const retries = [0, 1, 2, 3, 4].map(() => {
+      m.invalidate('at1');
+      return m.getToken([]);
+    });
+    release();
+    await expect(Promise.all(retries)).resolves.toEqual(Array(5).fill('at2'));
     expect(calls).toHaveLength(2);
+    expect(calls[1]!.form.get('refresh_token')).toBe('rt1');
+    expect(onRefreshed).toHaveBeenCalledTimes(2);
+    m.invalidate('at2');
+    await m.getToken([]);
+    expect(calls[2]!.form.get('refresh_token')).toBe('rt2');
   });
 
   it('refresh grant rotates refresh token and calls onRefreshed', async () => {
