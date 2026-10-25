@@ -1,5 +1,5 @@
 import { defineConfig } from '@natsuneko-laboratory/archon';
-import { csharp, kotlin, swift, typescript } from '@natsuneko-laboratory/archon/plugins';
+import { csharp, go, kotlin, swift, typescript } from '@natsuneko-laboratory/archon/plugins';
 
 export default defineConfig({
   input: 'https://api.natsuneko.com/openapi.json',
@@ -9,5 +9,6 @@ export default defineConfig({
     csharp({ output: 'csharp', namespace: 'Natsuneko.Api' }),
     kotlin({ output: 'kotlin', packageName: 'com.natsuneko.api' }),
     swift({ output: 'swift', moduleName: 'NatsunekoApi' }),
+    go({ output: 'go', module: 'github.com/natsuneko/api-go', packageName: 'natsuneko' }),
   ],
 });

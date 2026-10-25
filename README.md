@@ -3,9 +3,9 @@
 OpenAPI 3.0 / 3.1 の仕様から、**外部依存を最小化した** SDK を生成するジェネレータ（Meta SDK）です。
 設計の詳細は [`docs/superpowers/specs/2026-10-25-archon-design.md`](docs/superpowers/specs/2026-10-25-archon-design.md) を参照してください。
 
-現在は **M1〜M4（コア + TypeScript / C# / Kotlin / Swift プラグイン）** まで実装済みです。生成される SDK の依存は最小限（TypeScript は `fetch` のみ、
-C# は BCL のみ、Kotlin は `ktor-client-core` と `kotlinx-serialization-json` のみ、Swift は Foundation のみ）で、手書きのランタイムは生成物の `core/`
-（C# は `Core/`、Swift は `Sources/<Module>Core/`）にそのままコピーされます。
+現在は **M1〜M4 と M6（コア + TypeScript / C# / Kotlin / Swift / Go プラグイン）** を実装済みです。生成される SDK の依存は最小限（TypeScript は
+`fetch` のみ、C# は BCL のみ、Kotlin は `ktor-client-core` と `kotlinx-serialization-json` のみ、Swift は Foundation のみ、Go は標準ライブラリ
+のみ）で、手書きのランタイムは生成物の `core/`（C# は `Core/`、Swift は `Sources/<Module>Core/`）にそのままコピーされます。
 
 ## インストール
 
@@ -119,6 +119,19 @@ Kotlin プラグイン（`kotlin()`）の主なオプション（すべて任意
 | `naming` | 型 PascalCase、メソッド・プロパティ camelCase | `{ type, method, property, file }` ごとに `{ case, name }` |
 | `typeMappings` | `{}` | `'integer': 'Long'` や `'string:date-time': { type: 'kotlinx.datetime.Instant', serializer: 'kotlinx.datetime.serializers.InstantIso8601Serializer' }` のような `kind:format` / `kind` → Kotlin 型（文字列なら serializer は `<type>.serializer()`） |
 | `hooks` | `{}` | `typeName` / `methodName` / `propertyName` / `fileName` / `typeOverride`（Kotlin 型、または `{ type, serializer }`） |
+| `include` / `exclude` | なし | プラグイン単位の操作フィルタ |
+
+Go プラグイン（`go()`）の主なオプション（すべて任意）:
+
+| オプション | 既定 | 内容 |
+|---|---|---|
+| `output` | `'go'` | 出力サブディレクトリ |
+| `module` | packageName | `go.mod` の module パス（ランタイムは `<module>/core` として import される） |
+| `packageName` | title を英数字の小文字にしたもの | パッケージ名（モデル・サービス・クライアントはすべてこの 1 パッケージ） |
+| `package` | — | `go.mod` の `goVersion`（既定 `1.22`）と追加の `dependencies`（`'github.com/google/uuid v1.6.0'` のような `require` 行）。`false` で `go.mod` を生成しない（既存モジュールの中に置く場合。`module` はそのディレクトリの import パスにする） |
+| `naming` | 型・メソッド・フィールド PascalCase、ファイル `<snake_case>_model` | `{ type, method, property, file }` ごとに `{ case, name }` |
+| `typeMappings` | `{}` | `'string:date-time': 'string'` や `'string:uuid': { type: 'uuid.UUID', import: 'github.com/google/uuid' }` のような `kind:format` / `kind` → Go 型 |
+| `hooks` | `{}` | `typeName` / `methodName` / `propertyName` / `fileName` / `typeOverride`（Go 型、または `{ type, import }`） |
 | `include` / `exclude` | なし | プラグイン単位の操作フィルタ |
 
 ## 生成された SDK の使い方
@@ -389,6 +402,53 @@ let result = try await client.catalyst.getCatalystV1StatusByIdWithResponse(id: "
 - 値型が自分自身を値で含む循環（`Node.parent: Node?`、`A.b` ↔ `B.a`）は、該当プロパティをランタイムの `Indirect` に格納します（公開されるのは通常のプロパティです）。
 - 他言語との意図的な差分: Foundation の `URL` が受け付けない `|` `[` `]` は path / query で常に percent-encode します（`piped=1%7C2`、`filter%5Bstatus%5D=active`。サーバーでデコードした値は同じ）。空の JSON 応答（204 など）は戻り値型が Optional なら `nil`、そうでなければ `DecodeError` です。JSON の直列化はキー順を宣言順に保つためランタイムの `JSONValueEncoder` / `ApiJSON` を使い（`JSONEncoder` はキー順を保持しません）、デコードは `JSONDecoder` です。
 
+## 生成された Go SDK の使い方
+
+Go 1.22+ 向けで、依存は標準ライブラリのみです。生成物はそのまま gofmt 済みで、`go vet` を通ります。
+
+```
+go/
+  go.mod                  # package: false なら出力しない
+  client.go               # Client / ClientOptions / NewClient / DefaultBaseURL
+  auth.go                 # スキーム名ごとの型付き認証設定（Auth）
+  <name>_model.go         # schema ごとに 1 ファイル（すべて同じパッケージ）
+  <group>_service.go      # タグ（group）ごとのサービスと <Method>Params
+  core/*.go               # ランタイム（runtimes/go/src のコピー、package core）
+```
+
+```go
+import (
+	"github.com/natsuneko/api-go"
+	"github.com/natsuneko/api-go/core"
+)
+
+client := natsuneko.NewClient(natsuneko.ClientOptions{
+	BaseURL:    "https://api.natsuneko.com",            // 省略すると servers[0]（natsuneko.DefaultBaseURL）
+	HTTPClient: &http.Client{Transport: myTransport},   // 省略すると http.DefaultTransport
+	Auth:       &natsuneko.Auth{BearerAuth: core.StaticToken("token")},
+	Timeout:    30 * time.Second,
+	Middleware: []core.Middleware{core.Retry(core.RetryOptions{})},
+})
+
+status, resp, err := client.Catalyst.GetCatalystV1StatusById(ctx, natsuneko.GetCatalystV1StatusByIdParams{Id: "123"})
+```
+
+- 各操作は `ctx context.Context` を第 1 引数に取り、パラメータを持つ操作は `<Method>Params` 構造体（必須は値、任意は `*T` / スライス / map。`core.Ptr(v)` でポインタを作れる）、body を持つ操作はその後ろに body（必須は値、任意は `*T` で `nil` なら送らない）、最後に `opts ...core.RequestOption`（`core.WithHeader` / `core.WithBaseURL` / `core.WithExtension`）を取ります。
+- 戻り値は `(T, *http.Response, error)`（no-content の操作は `(*http.Response, error)`）。object / union のモデルは `*T`、それ以外（スライス・スカラー・enum）は値で、204 / 空 body は nil になる型ならゼロ値です。`*http.Response` の `Body` は読み込み済みのバイト列で何度でも読め、`Request.URL` は最終 URL です。非 2xx でも `*http.Response` を返します。
+- エラーは `errors.As` で取り出します: 非 2xx は `*core.APIError`（`StatusCode` / `Header` / `RawBody` / `URL` / `Body`。宣言された型のボディは `core.ErrorBody[*NotFoundError](err)`）、通信失敗・タイムアウトは `*core.TransportError`（`Timeout`。呼び出し側の `ctx` が終わった場合は `errors.Is(err, context.Canceled)` が成り立つ）、2xx ボディのデコード失敗は `*core.DecodeError`（`RawBody`）、必須認証の未設定は送信前に `*core.AuthError`（`Schemes`）。
+- 認証は `Auth` のフィールド（スキーム名の PascalCase）に設定します: bearer / apiKey は `core.TokenProvider`（`core.StaticToken("…")` または `core.TokenFunc(func(ctx) (string, error))`、送信のたびに呼ばれる）、basic は `core.Basic{Username, Password}` / `core.BasicFunc`、OAuth2 / OpenID Connect は `&core.OAuth2{AccessToken | ClientCredentials | RefreshToken}`。トークンは期限 30 秒前に先回り更新、同時取得は 1 回にまとめ（1 つの呼び出しの `ctx` が終わっても他は巻き込まない）、管理トークンで 401 を受けたら 1 回だけ更新して再送します。未対応スキームは `CustomAuth` で扱います。
+- Middleware は `func(req *core.Request, next core.Next, ctx *core.CallContext) (*core.Response, error)` で、`ClientOptions.Middleware` に並べるか `client.Use(...)` で追加します。登録順に外側から実行され、認証は最内側で適用されます。標準: `core.Logging`（資格情報をマスク）/ `core.UserAgent` / `core.Retry` / `core.Retry401`。
+- 渡した `*http.Client` は `CheckRedirect` だけを差し替えた浅いコピーで使います（元の client は変更しません）。リダイレクトはランタイムが手動で追い、別オリジンへ移るときは `Authorization` / `Cookie` / API キーを外します。`ClientOptions` は `NewClient` でコピーされ、以後の変更は `client.Use` だけです（`Auth` はポインタなので、スキームの値を差し替えれば次の送信から使われます）。
+
+型の対応: `date-time` → `time.Time`、`date` → `core.Date`（`YYYY-MM-DD`）、`uuid` / `uri` → `string`、`byte` → `[]byte`、`int64` → `int64`（`int32` → `int32`、format 無しは `int`）、`float` → `float32`、`binary` → `core.File`（`Content []byte` + `Name` + `ContentType`。`core.ReadFile(r, name, contentType)` で `io.Reader` から作る。再送できるようにメモリに保持する）、未知の schema → `json.RawMessage`。
+
+- **enum** は名前付き型と定数です（`type Status string`、`StatusActive`、`status.IsKnown()`）。未知の値もそのまま保持・再送できます。
+- **union** は「バリアントごとのポインタ + `Raw`」の構造体です（`Shape{Circle: &Circle{Radius: 1}}`、読み込み後は `shape.Circle != nil` で判別）。**判別あり** は判別値でバリアントを選び、**判別なし** は宣言順に試して最初に読めたものを採用します。どれにも当たらなければ `Raw` に生 JSON を保持し、書き込み時はそのまま返します。判別プロパティはバリアントに残り、空なら `MarshalJSON` がタグを補います。
+- 必須プロパティを持つ object は `UnmarshalJSON` で欠落（と non-null 必須の `null`）を検査します（`encoding/json` は検査しないため）。任意プロパティは `omitempty` なので、`nil` と空スライスは送られません。必須の object 参照は値型ですが、値型だけで循環する場合はポインタになります。
+- additionalProperties とプロパティを両方持つ object の追加プロパティは保持しません（プロパティの無い object は `map[string]T`）。
+
+生成した SDK は `go build` / `go vet` でビルドします（`package: false` にすると既存モジュールの一部として置けます）。
+
 ## カスタムプラグイン
 
 `definePlugin` で作ります。依存プラグイン（ここでは `typescript`）の公開 API `symbols` から、生成済みの型名・関数名を参照できます。
@@ -431,7 +491,7 @@ export default defineConfig({
 | M3 | Kotlin（JVM 11+ / Android）プラグイン & ktor-client-core + kotlinx-serialization-json のみのランタイム | 実装済み |
 | M4 | Swift 6 プラグイン & Foundation のみのランタイム（Apple プラットフォーム / Linux） | 実装済み |
 | M5 | Rust | 未着手 |
-| M6 | Go 1.22+ | 未着手 |
+| M6 | Go 1.22+ プラグイン & 標準ライブラリのみのランタイム | 実装済み |
 | M7 | Ruby 3.2+ | 未着手 |
 
 M1 の TypeScript プラグインでは `bigint`（int64）オプション、`naming.property` / `hooks.propertyName` / `naming.file` / `hooks.fileName` は提供していません。
@@ -448,6 +508,8 @@ pnpm test:e2e:kotlin   # 同じシナリオを生成 Kotlin SDK で実行する 
 runtimes/kotlin/gradlew -p runtimes/kotlin test   # Kotlin ランタイムの単体テスト（Gradle wrapper 同梱）
 pnpm test:e2e:swift    # 同じシナリオを生成 Swift SDK で実行する E2E（e2e/swift、要 Swift 6.1+）
 swift test --package-path runtimes/swift                 # Swift ランタイムの単体テスト（swift-testing）
+pnpm test:e2e:go       # 同じシナリオを生成 Go SDK で実行する E2E（e2e/go、要 Go 1.22+）
+(cd runtimes/go && go test -race ./...)   # Go ランタイムの単体テスト
 pnpm build       # 全パッケージのビルド
 pnpm -F @natsuneko-laboratory/archon-e2e-typescript smoke bun   # 生成 SDK を Bun / Deno（`smoke deno`）でモックサーバに対して実行
 ```
