@@ -6,7 +6,7 @@ import type { KotlinPluginOptions } from './index.js';
 // The only place these versions are written for generated SDKs; a test keeps runtimes/kotlin and e2e/kotlin in step.
 export const KOTLIN_VERSION = '2.4.21';
 export const KTOR_VERSION = '3.6.0';
-export const SERIALIZATION_VERSION = '1.11.0';
+export const SERIALIZATION_VERSION = '1.12.0';
 
 /** `build.gradle.kts` and `settings.gradle.kts`, or nothing when `package` is `false`. */
 export function renderProject(ctx: PluginContext<KotlinPluginOptions>, packageName: string): { file: string; content: string }[] {

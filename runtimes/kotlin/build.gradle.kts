@@ -14,7 +14,7 @@ repositories {
 
 dependencies {
     api("io.ktor:ktor-client-core:3.6.0")
-    api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+    api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
 
     testImplementation(platform("org.junit:junit-bom:5.14.4"))
     testImplementation(kotlin("test-junit5"))

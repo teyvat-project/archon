@@ -14,7 +14,7 @@ description = "Covers every feature the generators support. Implemented by the m
 
 dependencies {
     api("io.ktor:ktor-client-core:3.6.0")
-    api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+    api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
 }
 
 java {
