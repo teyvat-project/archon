@@ -85,6 +85,25 @@ async fn single_flight_for_concurrent_calls() {
 }
 
 #[tokio::test]
+async fn waiters_share_a_token_that_already_falls_inside_the_leeway() {
+    // expires_in 2 s is inside the 30 s leeway: every token is due for renewal as soon as it arrives.
+    let (server, issued) = token_server(2, Duration::from_millis(100));
+    let manager = Arc::new(manager(&server, credentials()));
+    let tasks: Vec<_> = (0..5)
+        .map(|_| {
+            let manager = manager.clone();
+            tokio::spawn(async move { manager.get_token(&[]).await.unwrap() })
+        })
+        .collect();
+    for task in tasks {
+        assert_eq!(task.await.unwrap(), "t1");
+    }
+    assert_eq!(issued.load(Ordering::SeqCst), 1);
+    // A later call renews it.
+    assert_eq!(manager.get_token(&[]).await.unwrap(), "t2");
+}
+
+#[tokio::test]
 async fn dropped_waiter_does_not_fail_the_others() {
     let (server, issued) = token_server(3600, Duration::from_millis(200));
     let manager = Arc::new(manager(&server, credentials()));

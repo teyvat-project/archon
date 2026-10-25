@@ -14,6 +14,8 @@ use crate::transport::transport_error;
 use crate::url;
 
 type Clock = Arc<dyn Fn() -> u64 + Send + Sync>;
+/// The lock of a token request in flight, and how many requests completed.
+type Flight = (Arc<tokio::sync::Mutex<()>>, u64);
 
 fn system_millis() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
@@ -21,8 +23,8 @@ fn system_millis() -> u64 {
 
 /// Obtains and caches OAuth2 access tokens through the client-credentials or refresh-token grant. Tokens are renewed
 /// `leeway` (default 30 s) before they expire; concurrent requests for the same scopes share one token request
-/// (single-flight). When the caller doing the token request is dropped, the request stops and the next waiting
-/// caller makes it again.
+/// (single-flight): callers that waited for it use its token, even one that already falls inside the leeway. When
+/// the caller doing the token request is dropped, the request stops and the next waiting caller makes it again.
 pub struct OAuth2TokenManager {
     http: reqwest::Client,
     config: OAuth2Value,
@@ -33,7 +35,7 @@ pub struct OAuth2TokenManager {
     leeway_millis: u64,
     timeout: Option<Duration>,
     cache: Mutex<HashMap<String, TokenSet>>,
-    flights: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    flights: Mutex<HashMap<String, Flight>>,
     refresh_token: Mutex<Option<String>>,
 }
 
@@ -99,15 +101,23 @@ impl OAuth2TokenManager {
         if let Some(token) = self.fresh(&key) {
             return Ok(token);
         }
-        let flight = self.flights.lock().unwrap_or_else(|e| e.into_inner()).entry(key.clone()).or_default().clone();
+        let (flight, seen) = self.flight(&key);
         let _guard = flight.lock().await;
-        // Another caller may have fetched the token while this one waited.
+        // A token request that completed while this caller waited answers it too.
+        if self.flight(&key).1 != seen {
+            if let Some(tokens) = self.cache.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+                return Ok(tokens.access_token.clone());
+            }
+        }
         if let Some(token) = self.fresh(&key) {
             return Ok(token);
         }
         let tokens = self.fetch(&requested).await?;
         let access = tokens.access_token.clone();
-        self.cache.lock().unwrap_or_else(|e| e.into_inner()).insert(key, tokens);
+        self.cache.lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone(), tokens);
+        if let Some(entry) = self.flights.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&key) {
+            entry.1 += 1;
+        }
         Ok(access)
     }
 
@@ -115,6 +125,13 @@ impl OAuth2TokenManager {
     /// are dropped, so a caller holding a stale token cannot discard a newer one.
     pub fn invalidate(&self, rejected: Option<&str>) {
         self.cache.lock().unwrap_or_else(|e| e.into_inner()).retain(|_, t| rejected.is_some_and(|r| t.access_token != r));
+    }
+
+    /// The lock for token requests of `key` and the number of requests completed so far.
+    fn flight(&self, key: &str) -> Flight {
+        let mut flights = self.flights.lock().unwrap_or_else(|e| e.into_inner());
+        let (lock, completed) = flights.entry(key.to_owned()).or_default();
+        (lock.clone(), *completed)
     }
 
     fn fresh(&self, key: &str) -> Option<String> {
