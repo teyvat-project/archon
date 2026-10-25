@@ -6,3 +6,7 @@ packages/archon/runtimes/
 .tmp/
 .superpowers/
 examples/*/sdk/
+
+**/bin/
+**/obj/
+e2e/csharp/generated/
