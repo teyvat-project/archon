@@ -18,6 +18,36 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@24.19.2)(jiti@2.7.0)(lightningcss@1.33.0)(yaml@2.9.1)
 
+  e2e/mock-server:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.19.2
+        version: 24.19.2
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  e2e/typescript:
+    devDependencies:
+      '@archon/e2e-mock-server':
+        specifier: workspace:*
+        version: link:../mock-server
+      '@types/node':
+        specifier: ^24.19.2
+        version: 24.19.2
+      archon:
+        specifier: workspace:*
+        version: link:../../packages/archon
+      jiti:
+        specifier: ^2.7.0
+        version: 2.7.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@24.19.2)(jiti@2.7.0)(lightningcss@1.33.0)(yaml@2.9.1)
+
   packages/archon:
     dependencies:
       '@apidevtools/json-schema-ref-parser':

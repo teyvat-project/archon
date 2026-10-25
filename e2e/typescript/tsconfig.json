@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "archon": ["../../packages/archon/src/index.ts"],
+      "archon/plugins": ["../../packages/archon/src/plugins.ts"]
+    }
+  },
+  "include": ["global-setup.ts", "vitest.config.ts", "test", "generated"]
+}
