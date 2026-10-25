@@ -16,18 +16,18 @@
     "go"
   ],
   "license": "MIT",
-  "homepage":"https://github.com/teyvat-project/Archon#readme",
+  "homepage": "https://github.com/teyvat-project/archon#readme",
   "bugs": {
-    "url": "https://github.com/teyvat-project/Archon/issues"
+    "url": "https://github.com/teyvat-project/archon/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/teyvat-project/Archon.git",
+    "url": "git+https://github.com/teyvat-project/archon.git",
     "directory": "packages/archon"
   },
   "type": "module",
   "bin": {
-    "archon": "./dist/cli.js"
+    "archon": "dist/cli.js"
   },
   "exports": {
     ".": {
