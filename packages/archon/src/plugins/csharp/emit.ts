@@ -13,8 +13,8 @@ export function csFile(ctx: PluginContext<CSharpPluginOptions>, namespace: strin
   w.comment(ctx.headerLines('csharp'), 'line');
   w.blank();
   w.line('#nullable enable');
-  // Generated code refers to deprecated members itself; CS1591 matters only to projects that build XML docs.
-  w.line('#pragma warning disable CS0612, CS0618, CS1591');
+  // Generated code refers to deprecated members itself; CS1573 / CS1591 matter only to projects that build XML docs.
+  w.line('#pragma warning disable CS0612, CS0618, CS1573, CS1591');
   w.blank();
   for (const u of usings) w.line(`using ${u};`);
   w.blank();

@@ -53,6 +53,11 @@ export class CsTypeResolver {
     return schema !== undefined && isDeclared(schema);
   }
 
+  /** A named schema. */
+  schema(schemaName: string): IRSchema | undefined {
+    return this.ir.schemas.get(schemaName);
+  }
+
   /** The runtime namespace, fully qualified. */
   get core(): string {
     return `global::${this.namespace}.Core`;

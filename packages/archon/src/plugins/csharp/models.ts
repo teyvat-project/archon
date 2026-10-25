@@ -63,7 +63,6 @@ export function renderModels(
   names: CsNames,
   resolver: CsTypeResolver,
   plan: UnionPlan,
-  fileFieldSchemas: ReadonlySet<string>,
 ): EmittedModel[] {
   const out: EmittedModel[] = [];
   for (const [schemaName, schema] of ctx.ir.schemas) {
@@ -74,7 +73,7 @@ export function renderModels(
     summary(w, schema.description);
     if (schema.deprecated) w.line(`[${G}.Obsolete]`);
     if (schema.kind === 'object') {
-      renderClass(w, { schemaName, schema, typeName, names, resolver, plan, fileFields: fileFieldSchemas.has(schemaName) });
+      renderClass(w, { schemaName, schema, typeName, names, resolver, plan });
     } else if (schema.kind === 'enum') {
       renderEnum(w, schema, typeName);
     } else if (schema.kind === 'union') {
@@ -89,7 +88,7 @@ export function renderModels(
 
 function renderClass(
   w: CodeWriter,
-  c: { schemaName: string; schema: ObjectSchema; typeName: string; names: CsNames; resolver: CsTypeResolver; plan: UnionPlan; fileFields: boolean },
+  c: { schemaName: string; schema: ObjectSchema; typeName: string; names: CsNames; resolver: CsTypeResolver; plan: UnionPlan },
 ): void {
   const base = c.plan.baseOf.get(c.schemaName);
   const dropped = base !== undefined ? c.plan.polymorphic.get(base)?.property : undefined;
@@ -107,8 +106,7 @@ function renderClass(
       summary(w, p.schema.description);
       if (p.schema.deprecated) w.line(`[${G}.Obsolete]`);
       w.line(`[${SER}.JsonPropertyName(${literal(p.name)})]`);
-      if (c.fileFields && isFileType(type, c.resolver)) w.line(`[${SER}.JsonIgnore]`);
-      else if (!p.required) w.line(`[${SER}.JsonIgnore(Condition = ${SER}.JsonIgnoreCondition.WhenWritingNull)]`);
+      if (!p.required) w.line(`[${SER}.JsonIgnore(Condition = ${SER}.JsonIgnoreCondition.WhenWritingNull)]`);
       w.line(`public ${p.required ? 'required ' : ''}${c.resolver.nullableCode(type, nullable)} ${members.get(p.name)} { get; set; }`);
     }
     // A derived variant inherits the base's extension data.

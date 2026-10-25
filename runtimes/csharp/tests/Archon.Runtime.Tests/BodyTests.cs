@@ -70,6 +70,24 @@ public class BodyTests
     }
 
     [Fact]
+    public async Task MultipartAddJsonExpandsArraysAndSkipsNull()
+    {
+        var body = new MultipartBody()
+            .AddJson("title", "hello", TestJson.Default.String)
+            .AddJson("count", (int?)2, TestJson.Default.NullableInt32)
+            .AddJson("none", (int?)null, TestJson.Default.NullableInt32)
+            .AddJson("tags", ["a", "b"], TestJson.Default.ListString)
+            .AddJson("meta", new Dictionary<string, int> { ["k"] = 1 }, TestJson.Default.DictionaryStringInt32);
+        var text = await body.CreateContent().ReadAsStringAsync();
+        Assert.Contains("name=\"title\"\r\n\r\nhello\r\n", text);
+        Assert.Contains("name=\"count\"\r\n\r\n2\r\n", text);
+        Assert.Contains("name=\"tags\"\r\n\r\na\r\n", text);
+        Assert.Contains("name=\"tags\"\r\n\r\nb\r\n", text);
+        Assert.Contains("name=\"meta\"\r\n\r\n{\"k\":1}\r\n", text);
+        Assert.DoesNotContain("none", text);
+    }
+
+    [Fact]
     public void StreamBodyIsNotReplayable()
     {
         var body = new StreamBody(new MemoryStream([1, 2, 3]), "application/octet-stream");

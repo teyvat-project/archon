@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Archon.Runtime;
 
@@ -133,6 +134,23 @@ public sealed class MultipartBody : ApiBody
     public MultipartBody AddText(string name, string value)
     {
         _parts.Add((name, value, null));
+        return this;
+    }
+
+    /// <summary>
+    /// Adds text parts for a JSON-serializable value: strings unquoted, numbers and booleans as written, arrays as
+    /// repeated parts, objects as JSON text; <c>null</c> adds nothing.
+    /// </summary>
+    public MultipartBody AddJson<T>(string name, T? value, JsonTypeInfo<T> info)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        if (value is null) return this;
+        var element = JsonSerializer.SerializeToElement(value, info);
+        var items = element.ValueKind == JsonValueKind.Array ? element.EnumerateArray().ToList() : [element];
+        foreach (var item in items)
+        {
+            if (item.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)) AddText(name, FieldText(item));
+        }
         return this;
     }
 
