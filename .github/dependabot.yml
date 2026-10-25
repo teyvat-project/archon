@@ -19,3 +19,13 @@ updates:
         dependency-type: development
       npm-production:
         dependency-type: production
+
+  - package-ecosystem: gradle
+    # The generated SDK's versions live in packages/archon/src/plugins/kotlin/project.ts; the plugin's versions test
+    # fails until that file is bumped to match these builds.
+    directories: ['/runtimes/kotlin', '/e2e/kotlin']
+    schedule:
+      interval: weekly
+    groups:
+      gradle:
+        patterns: ['*']

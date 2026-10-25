@@ -41,6 +41,12 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
+      # For the `gradle build` compile tests of the Kotlin output (skipped without JDK 17+).
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
       - run: pnpm test
 
   build:
@@ -59,10 +65,12 @@ jobs:
             const paths = files.map((f) => f.path);
             const required = ["dist/cli.js", "dist/index.js", "dist/index.d.ts", "dist/plugins.js", "dist/plugins.d.ts"];
             const missing = required.filter((p) => !paths.includes(p));
-            for (const lang of ["typescript", "csharp"]) {
+            for (const lang of ["typescript", "csharp", "kotlin"]) {
               if (!paths.some((p) => p.startsWith(`runtimes/${lang}/`))) missing.push(`runtimes/${lang}/**`);
             }
-            const leaked = paths.filter((p) => /^runtimes\/csharp\/.*(\.csproj$|\/(bin|obj)\/)/.test(p));
+            const leaked = paths.filter(
+              (p) => /^runtimes\/csharp\/.*(\.csproj$|\/(bin|obj)\/)/.test(p) || /^runtimes\/kotlin\/(src\/test\/|.*\/(build|\.gradle)\/)/.test(p),
+            );
             if (leaked.length > 0) missing.push(`no build files (${leaked.join(", ")})`);
             console.log(paths.join("\n"));
             if (missing.length > 0) {
@@ -142,10 +150,38 @@ jobs:
           dotnet-version: '10.0.x'
       - run: pnpm test:e2e:csharp
 
+  # ---- Kotlin SDK ----
+
+  runtime-kotlin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+      - run: runtimes/kotlin/gradlew -p runtimes/kotlin test --console=plain
+
+  # Generates the edge-cases SDK and runs the JUnit suite in e2e/kotlin against the shared mock server.
+  e2e-kotlin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-workspace
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+      - run: pnpm test:e2e:kotlin
+
   # Single required check for branch protection; add new jobs to `needs`.
   ci-ok:
     if: always()
-    needs: [typecheck, test, build, e2e-typescript, runtime-typescript-node, runtime-typescript-smoke, runtime-csharp, e2e-csharp]
+    needs: [typecheck, test, build, e2e-typescript, runtime-typescript-node, runtime-typescript-smoke, runtime-csharp, e2e-csharp, runtime-kotlin, e2e-kotlin]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
