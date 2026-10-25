@@ -1,76 +1,145 @@
 # Archon
 
-OpenAPI 3.0 / 3.1 の仕様から、**外部依存を最小化した** SDK を生成するジェネレータ（Meta SDK）です。
-設計の詳細は [`docs/superpowers/specs/2026-10-25-archon-design.md`](docs/superpowers/specs/2026-10-25-archon-design.md) を参照してください。
+[![npm](https://img.shields.io/npm/v/@natsuneko-laboratory/archon.svg)](https://www.npmjs.com/package/@natsuneko-laboratory/archon)
+[![CI](https://github.com/teyvat-project/Archon/actions/workflows/ci.yml/badge.svg)](https://github.com/teyvat-project/Archon/actions/workflows/ci.yml)
 
-現在は **M1〜M6（コア + TypeScript / C# / Kotlin / Swift / Rust / Go プラグイン）** まで実装済みです。生成される SDK の依存は最小限（TypeScript は `fetch` のみ、
-C# は BCL のみ、Kotlin は `ktor-client-core` と `kotlinx-serialization-json` のみ、Swift は Foundation のみ、Rust は `reqwest` / `serde` / `serde_json` /
-`tokio` のみ、Go は標準ライブラリのみ）で、手書きのランタイムは生成物の `core/`（C# は `Core/`、Swift は `Sources/<Module>Core/`、Rust は `src/core/`）に
-そのままコピーされます。
+**Archon** generates SDKs with minimal dependencies from OpenAPI 3.0 / 3.1 specs. You configure it once, and it
+generates idiomatic clients for **TypeScript, C#, Kotlin, Swift, Rust and Go**.
 
-## インストール
+Each SDK includes a small handwritten runtime that is copied into the output. It handles authentication
+(including OAuth2), middleware, retries, safe redirects and typed errors, so the generated code adds as few
+dependencies as possible to your project:
 
-npm にはまだ公開していません。当面はこのリポジトリのワークスペースで開発・利用します（Node.js 24 / pnpm 10）。
+| Target         | Platforms                                                     | Runtime dependencies                                                  |
+| -------------- | ------------------------------------------------------------- | --------------------------------------------------------------------- |
+| **TypeScript** | Browsers, Node.js 18+, Bun, Deno, React Native, Cloudflare Workers | none (global `fetch` only)                                       |
+| **C#**         | .NET 10 (AOT / trimming friendly)                             | none (BCL only)                                                       |
+| **Kotlin**     | JVM 11+, Android                                              | `ktor-client-core`, `kotlinx-serialization-json`                      |
+| **Swift**      | Swift 6 on macOS 12+, iOS 15+, tvOS 15+, watchOS 8+, visionOS 1+, Linux | none (Foundation only)                                      |
+| **Rust**       | stable Rust 1.88+ (edition 2021), tokio                       | `reqwest`, `serde`, `serde_json`, `tokio`                             |
+| **Go**         | Go 1.22+                                                      | none (standard library only)                                          |
+
+## Features
+
+- **OpenAPI 3.0 and 3.1** input from a file, a URL (with optional headers) or an in-memory object.
+- **Typed models and operations.** Enums and unions keep unknown values instead of failing, so older clients
+  keep working when the API adds new variants.
+- **Authentication** from `securitySchemes`: HTTP bearer / basic, API keys (header / query / cookie), and OAuth2 /
+  OpenID Connect. OAuth2 supports static tokens, client credentials and refresh tokens, with proactive refresh,
+  single-flight token fetching and one retry after a `401`.
+- **Onion-style middleware** with built-in logging (credentials are masked), User-Agent, retry (honors
+  `Retry-After`) and retry-on-401.
+- **Safe redirects.** The runtime follows redirects itself and removes `Authorization`, `Cookie` and API keys
+  when the redirect goes to a different origin.
+- **Filtering and patching.** Include or exclude operations, tags and schemas; rename schemas; patch the document
+  before generation.
+- **Plugin architecture.** Each language is a plugin, and you can write your own plugins on top of them.
+
+## Installation
+
+The CLI requires **Node.js 22.19 or later**.
 
 ```sh
-pnpm install
-pnpm -F @natsuneko-laboratory/archon build   # CLI (packages/archon/dist/cli.js) を作る
+npm install --save-dev @natsuneko-laboratory/archon
+# or
+pnpm add -D @natsuneko-laboratory/archon
 ```
 
-公開後は `pnpm add -D @natsuneko-laboratory/archon` で利用する想定です。
-
-## 使い方
-
-### CLI
+## Quick start
 
 ```sh
-archon init                         # カレントディレクトリに archon.config.ts のテンプレートを作る（既存なら失敗）
-archon generate                     # archon.config.{ts,mts,mjs,js,json} を読んで生成する
-archon generate -c path/to/archon.config.ts
-archon generate --plugin typescript # 指定プラグイン（と依存）だけ実行。繰り返し指定可
-archon generate --strict            # 警告が 1 件でもあれば何も書き出さずに失敗する
-archon generate --verbose           # info レベルの診断（命名衝突の改名など）も表示する
+npx archon init       # creates archon.config.ts in the current directory
+npx archon generate   # reads archon.config.ts and writes the SDKs
 ```
 
-ワークスペース内では（先に `pnpm -F @natsuneko-laboratory/archon build` が必要）、`examples/natsuneko` のように `@natsuneko-laboratory/archon` を devDependency に持つパッケージから `pnpm exec archon generate` で実行できます。
-
-```sh
-cd examples/natsuneko && pnpm exec archon generate   # → examples/natsuneko/sdk/ts/
-```
-
-### 設定ファイル
-
-`archon.config.ts`（ローダーは jiti）。配列を `defineConfig([a, b])` に渡すと複数ジョブになります。
+The `archon.config.ts` created by `init`:
 
 ```ts
 import { defineConfig } from '@natsuneko-laboratory/archon';
 import { typescript } from '@natsuneko-laboratory/archon/plugins';
 
 export default defineConfig({
-  input: 'https://api.natsuneko.com/openapi.json', // パス | URL | { path, headers? } | OpenAPI オブジェクト
+  input: './openapi.yaml',
   output: {
     path: './sdk',
-    clean: true, // 出力先を毎回クリア（既定 true）
-    header: (ctx) => ctx.defaultValue, // 生成物ヘッダ（行配列）の上書き
+  },
+  plugins: [typescript()],
+});
+```
+
+Then call your API:
+
+```ts
+import { createApiClient, showPetById } from './sdk/typescript/index.js';
+
+const client = createApiClient({ baseUrl: 'https://petstore.example.com/v1' });
+
+const { data, error } = await showPetById({ client, path: { petId: '1' } });
+if (error) {
+  console.error(error.status, error.body);
+} else {
+  console.log(data.name);
+}
+```
+
+To generate SDKs for more languages, add more plugins:
+
+```ts
+import { csharp, go, kotlin, rust, swift, typescript } from '@natsuneko-laboratory/archon/plugins';
+
+export default defineConfig({
+  input: './openapi.yaml',
+  output: './sdk',
+  plugins: [typescript(), csharp(), kotlin(), swift(), rust(), go()],
+});
+```
+
+## CLI
+
+```sh
+archon init                          # create an archon.config.ts template (fails if one already exists)
+archon generate                      # load archon.config.{ts,mts,mjs,js,json} and generate
+archon generate -c path/to/archon.config.ts
+archon generate --plugin typescript  # run only this plugin (and its dependencies); repeatable
+archon generate --strict             # fail without writing anything if there is any warning
+archon generate --verbose            # also print info diagnostics (e.g. renames caused by name collisions)
+```
+
+## Configuration
+
+The config file is loaded with [jiti](https://github.com/unjs/jiti), so you can write it in TypeScript. If you pass an
+array to `defineConfig([a, b])`, Archon runs each config as a separate job.
+
+```ts
+import { defineConfig } from '@natsuneko-laboratory/archon';
+import { typescript } from '@natsuneko-laboratory/archon/plugins';
+
+export default defineConfig({
+  input: 'https://api.example.com/openapi.json', // path | URL | { path, headers? } | OpenAPI object
+  output: {
+    path: './sdk',
+    clean: true, // clear the output directory on every run (default: true)
+    header: (ctx) => ctx.defaultValue, // override the header lines written to generated files
     postProcess: [{ command: 'prettier', args: ['--write', '{{path}}'] }],
   },
   parser: {
     filters: {
-      // "METHOD /path" の完全一致、または "/regex/"。include と exclude の両方に一致したら exclude が優先
-      operations: { include: ['/^GET /catalyst/'], exclude: ['DELETE /catalyst/v1/blocks'] },
-      tags: { exclude: ['activitypub'] },
-      // schemas / deprecated: false で除いた schema がまだ参照されていると、その参照は unknown 型になり
-      // filter-dangling-ref の警告が出る（不正な /regex/ は invalid-filter-pattern エラー）
+      // An exact "METHOD /path" match or a "/regex/". If both include and exclude match, exclude wins.
+      operations: { include: ['/^GET /pets/'], exclude: ['DELETE /pets/{petId}'] },
+      tags: { exclude: ['internal'] },
+      // If a schema removed by `schemas` (or `deprecated: false`) is still referenced, the reference becomes
+      // `unknown` and a `filter-dangling-ref` warning is reported. An invalid /regex/ is an
+      // `invalid-filter-pattern` error.
       schemas: { exclude: ['/^Internal/'] },
     },
     transforms: {
-      schemaName: 'Api{{name}}', // テンプレートまたは (name) => string
+      schemaName: 'Api{{name}}', // a template or (name) => string
     },
   },
   plugins: [
     typescript({
-      output: 'ts', // output.path からのサブディレクトリ（既定 'typescript'）
-      dates: 'Date', // date-time / date を Date にする（既定 'string'）
+      output: 'ts', // subdirectory of output.path (default: 'typescript')
+      dates: 'Date', // convert date-time / date to Date (default: 'string')
       enums: 'union', // 'union' | 'const' | 'enum'
       sdk: { style: 'functions' }, // 'functions' | 'class'
     }),
@@ -78,146 +147,207 @@ export default defineConfig({
 });
 ```
 
-`output` は文字列（`'./sdk'`）でも書けます。`parser` には他に `patch`（document / schemas / operations の書き換え）、
-`hooks`（`operationName` / `operationGroup` / `inlineSchemaName`）があります。
+`output` can also be a plain string (`'./sdk'`). `parser` also accepts `patch` (to rewrite the document, schemas or
+operations before generation) and `hooks` (`operationName`, `operationGroup` and `inlineSchemaName`).
 
-TypeScript プラグインの主なオプション（すべて任意）:
+### Plugin options
 
-| オプション | 既定 | 内容 |
-|---|---|---|
-| `output` | `'typescript'` | 出力サブディレクトリ |
-| `package` | info から導出 | `package.json` / `tsconfig.json` の情報。`false` で生成しない |
-| `sdk.style` | `'functions'` | `getX(options)` 関数、または `class`（static メソッド） |
-| `enums` | `'union'` | named enum の宣言形式 |
-| `dates` | `'string'` | `'Date'` にすると成功応答の日時を `Date` に変換する（`transformers.gen.ts`）。エラーボディは変換されないので、エラー型の日時は常に `string`（共有 schema は `DatesAsString<T>` で包む） |
-| `importExtension` | `'.js'` | 生成コードの相対 import の拡張子（`'.ts'` / `''` も可） |
-| `naming` | PascalCase / camelCase | `{ type, method }` ごとに `{ case, name }` |
-| `typeMappings` | `{}` | `'string:uuid': 'Uuid'` のような `kind:format` → TS 型式の上書き |
-| `hooks` | `{}` | `typeName` / `methodName` / `typeOverride` |
-| `include` / `exclude` | なし | プラグイン単位の操作フィルタ（`parser.filters` と同じ構文） |
+All plugin options are optional. All plugins accept the following common options:
 
-C# プラグイン（`csharp()`）の主なオプション（すべて任意）:
+| Option                | Description                                                                                              |
+| --------------------- | -------------------------------------------------------------------------------------------------------- |
+| `output`              | Subdirectory of `output.path`. Defaults to the language name (`'typescript'`, `'csharp'`, `'kotlin'`, `'swift'`, `'rust'`, `'go'`). |
+| `naming`              | `{ case, name }` rules per kind of name (see each language below).                                       |
+| `typeMappings`        | Overrides keyed by `'kind:format'` (e.g. `'string:uuid'`) or `'kind'` (e.g. `'integer'`).                 |
+| `hooks`               | Callbacks for `typeName`, `methodName`, `typeOverride` and, except in TypeScript, `propertyName` and `fileName`. |
+| `include` / `exclude` | Per-plugin operation filters, with the same syntax as `parser.filters`.                                  |
 
-| オプション | 既定 | 内容 |
-|---|---|---|
-| `output` | `'csharp'` | 出力サブディレクトリ |
-| `namespace` | title の PascalCase | ルート namespace（ランタイムは `<namespace>.Core`） |
-| `clientName` | `'ApiClient'` | クライアントクラス名（オプションクラスは `<clientName>Options`） |
-| `package` | info から導出 | `.csproj` の `name`（= PackageId / AssemblyName）/ `version` / `description` / `authors` / `license`。`false` で生成しない |
-| `naming` | 型・プロパティ PascalCase、メソッド `{{name}}Async` | `{ type, method, property, file }` ごとに `{ case, name }` |
-| `typeMappings` | `{}` | `'string:uuid': 'string'` / `'integer': 'long'` のような `kind:format` または `kind` → C# 型式の上書き |
-| `hooks` | `{}` | `typeName` / `methodName`（基底名を返し、`naming.method` のテンプレートはその後に適用）/ `propertyName` / `fileName` / `typeOverride` |
-| `include` / `exclude` | なし | プラグイン単位の操作フィルタ |
+<details>
+<summary><strong>TypeScript</strong> — <code>typescript()</code></summary>
 
-Kotlin プラグイン（`kotlin()`）の主なオプション（すべて任意）:
+| Option            | Default                   | Description                                                                                                                                                                                                                                              |
+| ----------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `package`         | derived from `info`       | Contents of `package.json` / `tsconfig.json`. `false` skips them.                                                                                                                                                                                         |
+| `sdk.style`       | `'functions'`             | `'functions'` generates one function per operation (`getX(options)`). `'class'` generates classes with static methods.                                                                                                                                  |
+| `enums`           | `'union'`                 | How named enums are declared: `'union'`, `'const'` or `'enum'`.                                                                                                                                                                                        |
+| `dates`           | `'string'`                | `'Date'` converts date-times in successful responses to `Date` (`transformers.gen.ts`). Error bodies are not converted, so dates in error types are always `string`. Shared schemas used in error types are wrapped with `DatesAsString<T>`. |
+| `importExtension` | `'.js'`                   | Extension for relative imports in the generated code (`'.ts'` and `''` are also allowed).                                                                                                                                                                   |
+| `naming`          | PascalCase / camelCase    | `{ type, method }`.                                                                                                                                                                                                                                      |
+| `typeMappings`    | `{}`                      | e.g. `{ 'string:uuid': 'Uuid' }`, mapped to a TypeScript type expression.                                                                                                                                                                                |
+| `hooks`           | `{}`                      | `typeName`, `methodName`, `typeOverride`.                                                                                                                                                                                                                |
 
-| オプション | 既定 | 内容 |
-|---|---|---|
-| `output` | `'kotlin'` | 出力サブディレクトリ |
-| `packageName` | title を `.` で区切り、各部分を英数字の小文字にしたもの | ルート package（ランタイムは `<packageName>.core`、モデルは `.models`、サービスは `.services`） |
-| `clientName` | `'ApiClient'` | クライアントクラス名（オプションクラスは `<clientName>Options`） |
-| `package` | info から導出 | Gradle の `group`（既定 packageName）/ `name`（既定 title の kebab-case）/ `version` / `description` / 追加の `dependencies`（`implementation(...)`）。`false` で Gradle ファイルを生成しない |
-| `naming` | 型 PascalCase、メソッド・プロパティ camelCase | `{ type, method, property, file }` ごとに `{ case, name }` |
-| `typeMappings` | `{}` | `'integer': 'Long'` や `'string:date-time': { type: 'kotlinx.datetime.Instant', serializer: 'kotlinx.datetime.serializers.InstantIso8601Serializer' }` のような `kind:format` / `kind` → Kotlin 型（文字列なら serializer は `<type>.serializer()`） |
-| `hooks` | `{}` | `typeName` / `methodName` / `propertyName` / `fileName` / `typeOverride`（Kotlin 型、または `{ type, serializer }`） |
-| `include` / `exclude` | なし | プラグイン単位の操作フィルタ |
+</details>
 
-Rust プラグイン（`rust()`）の主なオプション（すべて任意）:
+<details>
+<summary><strong>C#</strong> — <code>csharp()</code></summary>
 
-| オプション | 既定 | 内容 |
-|---|---|---|
-| `output` | `'rust'` | 出力サブディレクトリ |
-| `clientName` | `'ApiClient'` | クライアント構造体名（ビルダーは `<clientName>Builder`） |
-| `package` | info から導出 | `Cargo.toml` の `name`（既定 title の kebab-case）/ `version`（既定 `info.version`、semver でなければ `0.1.0`）/ `description` / `license` / `authors` / `repository` / 追加の `dependencies`（`[dependencies]` にそのまま書く行）。`false` で `Cargo.toml` を生成しない |
-| `naming` | 型 PascalCase、メソッド・フィールド snake_case、ファイルは型名の snake_case | `{ type, method, property, file }` ごとに `{ case, name }` |
-| `typeMappings` | `{}` | `'integer': 'i32'` や `'string:date-time': 'chrono::DateTime<chrono::Utc>'` のような `kind:format` / `kind` → Rust 型（serde を実装していること） |
-| `hooks` | `{}` | `typeName` / `methodName` / `propertyName` / `fileName` / `typeOverride`（Rust 型） |
-| `include` / `exclude` | なし | プラグイン単位の操作フィルタ |
+| Option         | Default                                               | Description                                                                                                         |
+| -------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `namespace`    | title in PascalCase                                   | Root namespace. The runtime goes in `<namespace>.Core`.                                                              |
+| `clientName`   | `'ApiClient'`                                         | Client class name. The options class is `<clientName>Options`.                                                      |
+| `package`      | derived from `info`                                   | `.csproj` `name` (PackageId / AssemblyName), `version`, `description`, `authors`, `license`. `false` skips the `.csproj`. |
+| `naming`       | types / properties PascalCase, methods `{{name}}Async` | `{ type, method, property, file }`.                                                                                 |
+| `typeMappings` | `{}`                                                  | e.g. `{ 'string:uuid': 'string', integer: 'long' }`, mapped to a C# type expression.                                 |
+| `hooks`        | `{}`                                                  | `typeName`, `methodName` (returns the base name; the `naming.method` template is applied afterwards), `propertyName`, `fileName`, `typeOverride`. |
 
-Go プラグイン（`go()`）の主なオプション（すべて任意）:
+</details>
 
-| オプション | 既定 | 内容 |
-|---|---|---|
-| `output` | `'go'` | 出力サブディレクトリ |
-| `module` | packageName | `go.mod` の module パス（ランタイムは `<module>/core` として import される） |
-| `packageName` | title を英数字の小文字にしたもの | パッケージ名（モデル・サービス・クライアントはすべてこの 1 パッケージ） |
-| `package` | — | `go.mod` の `goVersion`（既定 `1.22`）と追加の `dependencies`（`'github.com/google/uuid v1.6.0'` のような `require` 行）。`false` で `go.mod` を生成しない（既存モジュールの中に置く場合。`module` はそのディレクトリの import パスにする） |
-| `naming` | 型・メソッド・フィールド PascalCase、ファイル `<snake_case>_model` | `{ type, method, property, file }` ごとに `{ case, name }` |
-| `typeMappings` | `{}` | `'string:date-time': 'string'` や `'string:uuid': { type: 'uuid.UUID', import: 'github.com/google/uuid' }` のような `kind:format` / `kind` → Go 型 |
-| `hooks` | `{}` | `typeName` / `methodName` / `propertyName` / `fileName` / `typeOverride`（Go 型、または `{ type, import }`） |
-| `include` / `exclude` | なし | プラグイン単位の操作フィルタ |
+<details>
+<summary><strong>Kotlin</strong> — <code>kotlin()</code></summary>
 
-## 生成された SDK の使い方
+| Option         | Default                                                       | Description                                                                                                                                       |
+| -------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packageName`  | the title split on `.`, with each part lowercased and stripped to letters and digits | Root package. The runtime is `<packageName>.core`, models are `.models`, services are `.services`.                                                |
+| `clientName`   | `'ApiClient'`                                                 | Client class name. The options class is `<clientName>Options`.                                                                                    |
+| `package`      | derived from `info`                                           | Gradle `group` (default: `packageName`), `name` (default: title in kebab-case), `version`, `description`, and extra `dependencies` (`implementation(...)`). `false` skips the Gradle files. |
+| `naming`       | types PascalCase, methods / properties camelCase              | `{ type, method, property, file }`.                                                                                                               |
+| `typeMappings` | `{}`                                                          | e.g. `{ integer: 'Long', 'string:date-time': { type: 'kotlinx.datetime.Instant', serializer: 'kotlinx.datetime.serializers.InstantIso8601Serializer' } }`. A plain string uses `<type>.serializer()`. |
+| `hooks`        | `{}`                                                          | `typeName`, `methodName`, `propertyName`, `fileName`, `typeOverride` (a Kotlin type or `{ type, serializer }`).                                    |
 
-`ts/` の下に `types.gen.ts` / `sdk.gen.ts` / `client.gen.ts` / `index.ts` / `core/`（ランタイム）が出力されます。
-操作は `method` + パスの camelCase 名の関数になります（例: `GET /catalyst/v1/status/{id}` → `getCatalystV1StatusById`）。
-パスパラメータ・クエリ・ボディはそれぞれ `path` / `query` / `body` で渡します。
+</details>
+
+<details>
+<summary><strong>Swift</strong> — <code>swift()</code></summary>
+
+| Option         | Default                                        | Description                                                                          |
+| -------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `moduleName`   | title in PascalCase                            | SDK module and library product name. The runtime module is `<moduleName>Core`.        |
+| `clientName`   | `'ApiClient'`                                  | Client class name.                                                                   |
+| `package`      | `{ name: moduleName }`                         | `Package.swift` settings. `false` skips the manifest.                                |
+| `naming`       | types PascalCase, methods / properties camelCase, files = type name | `{ type, method, property, file }`.                                           |
+| `typeMappings` | `{}`                                           | Swift type expressions. They must be `Codable`, `Hashable` and `Sendable`.           |
+| `hooks`        | `{}`                                           | `typeName`, `methodName`, `propertyName`, `fileName`, `typeOverride` (a Swift type). |
+
+</details>
+
+<details>
+<summary><strong>Rust</strong> — <code>rust()</code></summary>
+
+| Option         | Default                                                              | Description                                                                                                                                                                                                                         |
+| -------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `clientName`   | `'ApiClient'`                                                        | Client struct name. The builder is `<clientName>Builder`.                                                                                                                                                                           |
+| `package`      | derived from `info`                                                  | `Cargo.toml` `name` (default: title in kebab-case), `version` (default: `info.version`, or `0.1.0` if it is not semver), `description`, `license`, `authors`, `repository`, and extra `dependencies` (lines added to `[dependencies]` as-is). `false` skips `Cargo.toml`. |
+| `naming`       | types PascalCase, methods / fields snake_case, files = snake_case type name | `{ type, method, property, file }`.                                                                                                                                                                                                |
+| `typeMappings` | `{}`                                                                 | e.g. `{ integer: 'i32', 'string:date-time': 'chrono::DateTime<chrono::Utc>' }`. Types must implement serde.                                                                                                                         |
+| `hooks`        | `{}`                                                                 | `typeName`, `methodName`, `propertyName`, `fileName`, `typeOverride` (a Rust type).                                                                                                                                                  |
+
+</details>
+
+<details>
+<summary><strong>Go</strong> — <code>go()</code></summary>
+
+| Option         | Default                                                  | Description                                                                                                                                                                                                                  |
+| -------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `module`       | `packageName`                                            | Module path in `go.mod`. The runtime is imported as `<module>/core`.                                                                                                                                                          |
+| `packageName`  | title, lowercased and stripped to letters and digits     | Package name. Models, services and the client all go in this one package.                                                                                                                                                    |
+| `package`      | —                                                        | `goVersion` for `go.mod` (default: `1.22`) and extra `dependencies` (`require` lines such as `'github.com/google/uuid v1.6.0'`). `false` skips `go.mod`, so you can put the SDK inside an existing module. In that case, set `module` to the directory's import path. |
+| `naming`       | types / methods / fields PascalCase, files `<snake_case>_model` | `{ type, method, property, file }`.                                                                                                                                                                                  |
+| `typeMappings` | `{}`                                                     | e.g. `{ 'string:date-time': 'string', 'string:uuid': { type: 'uuid.UUID', import: 'github.com/google/uuid' } }`.                                                                                                             |
+| `hooks`        | `{}`                                                     | `typeName`, `methodName`, `propertyName`, `fileName`, `typeOverride` (a Go type or `{ type, import }`).                                                                                                                      |
+
+</details>
+
+## Using the generated SDKs
+
+The examples below use the classic [Petstore](https://github.com/teyvat-project/Archon/blob/main/fixtures/specs/petstore.yaml)
+spec (`GET /pets/{petId}` with `operationId: showPetById`, tagged `pets`), and assume that the spec also defines an
+HTTP bearer security scheme named `bearerAuth`. Operations are named after their
+`operationId`. If there is none, the name is derived from the method and the path (`GET /pets/{petId}` →
+`getPetsByPetId`). Operations are grouped into services by their tag.
+
+All SDKs behave the same way:
+
+- **Base URL** defaults to `servers[0]` in the spec.
+- **Authentication** is configured per security scheme name. The SDK evaluates the operation's `security`
+  requirements in order and applies the first alternative that your configured schemes can satisfy. Operations with
+  an optional (`{}`) requirement are sent without credentials when none are configured. If a required scheme is
+  missing, the SDK throws an auth error before sending the request. Schemes the SDK cannot handle itself (e.g. HTTP
+  digest, `mutualTLS`) produce a warning at generation time and can be handled with a custom auth hook.
+- **OAuth2 tokens** are refreshed 30 seconds before they expire. Concurrent fetches share one request, and a `401`
+  on a managed token triggers one forced refresh and retry.
+- **Middleware** runs outermost-first in registration order. Authentication is always applied innermost, right
+  before the transport. Built-in middleware: logging (masks `Authorization`, `Cookie`, `Proxy-Authorization` and API
+  keys), User-Agent, retry (idempotent methods only, honors `Retry-After` on 429 / 503), and retry-on-401. Requests
+  with a non-replayable streaming body are not retried.
+- **Errors** are split into four kinds: API errors (non-2xx, with the typed error body declared for that status),
+  transport errors (network failure, timeout, cancellation), decode errors (a 2xx body that cannot be
+  deserialized) and auth errors.
+- **Enums and unions are forward compatible.** Unknown enum values and unknown union variants are kept, including
+  the raw JSON for unions, and are sent back unchanged.
+
+### TypeScript
+
+The output contains `types.gen.ts`, `sdk.gen.ts`, `client.gen.ts`, `index.ts` and the runtime in `core/`.
+Path parameters, query parameters and the body are passed as `path`, `query` and `body`.
 
 ```ts
-import { createApiClient, getCatalystV1Announcements, getCatalystV1StatusById } from './sdk/ts/index.js';
+import { createApiClient, listPets, showPetById } from './sdk/typescript/index.js';
 
-// baseUrl の既定は spec の servers[0]（servers が無ければ '/'）
 const client = createApiClient({
-  auth: { bearerAuth: 'my-token' }, // または () => getToken()
+  baseUrl: 'https://petstore.example.com/v1', // defaults to servers[0] ('/' if there are no servers)
+  auth: { bearerAuth: 'my-token' }, // or () => getToken()
   headers: { 'X-App': 'demo' },
-  timeout: 10_000, // ミリ秒
+  timeout: 10_000, // milliseconds
 });
 
-const { data, error, response } = await getCatalystV1StatusById({ client, path: { id: '123' } });
+const { data, error, response } = await showPetById({ client, path: { petId: '1' } });
 if (error) {
-  console.error(error.status, error.body); // ApiError。body は該当ステータスの型付きエラーボディ
+  console.error(error.status, error.body); // ApiError; body is the typed error body for that status
 } else {
-  console.log(data.status);
+  console.log(data.name);
 }
 
-// throwOnError: 失敗時に例外を投げ、戻り値は { data, response } になる（client 設定でも指定可）
-const { data: list } = await getCatalystV1Announcements({ client, throwOnError: true });
+// throwOnError: throw on failure and return { data, response } (can also be set on the client)
+const { data: pets } = await listPets({ client, query: { limit: 20 }, throwOnError: true });
 ```
 
-`client` を省略すると生成済みの共有クライアント（`client.gen.ts` の `client`）が使われます。各呼び出しには
-`signal`（`AbortSignal`）、`baseUrl`、`extensions`（middleware に渡す任意値）も指定できます。
+If you omit `client`, the shared client exported from `client.gen.ts` is used. Each call also accepts `signal`
+(`AbortSignal`), `baseUrl` and `extensions` (arbitrary values passed to middleware).
 
-`baseUrl` が相対（spec の servers が `/api` のような相対 URL、または servers が無く既定の `/`）の場合、ブラウザでは
-`location.href` に対して解決します。`location` の無い環境（Node.js / Workers など）では `TypeError` になるので、
-`createApiClient({ baseUrl: 'https://api.example.com' })` のように絶対 URL を渡してください。
+If `baseUrl` is relative (a relative `servers` URL such as `/api`, or the default `/` when there are no servers), it
+is resolved against `location.href` in browsers. In environments without `location` (Node.js, Workers, etc.) this
+throws a `TypeError`, so pass an absolute URL: `createApiClient({ baseUrl: 'https://api.example.com' })`.
 
-パスパラメータの値が `''` / `.` / `..` になる（そのセグメントが空や dot segment になる）呼び出しは、URL の正規化で
-別のパスに送られるのを防ぐため送信前に `TypeError` になります。`allowReserved` はクエリパラメータにだけ適用されます。
+A call throws a `TypeError` before sending if a path parameter value is `''`, `.` or `..`, because URL normalization
+would send the request to a different path. `allowReserved` applies only to query parameters.
 
-### 認証
+#### Authentication
 
-`auth` のキーは spec の securitySchemes 名で、型は spec から生成されます。値は文字列または（非同期）関数です。
+The keys of `auth` are the `securitySchemes` names from the spec, and their types are generated from it. Each value
+is a string or a function that returns one (sync or async).
 
 ```ts
 createApiClient({
   auth: {
     bearerAuth: 'token', // http bearer
     basicAuth: { username: 'u', password: 'p' }, // http basic
-    apiKeyHeader: () => loadKey(), // apiKey（in / name は spec に従う: header / query / cookie）
+    apiKeyHeader: () => loadKey(), // apiKey (`in` / `name` come from the spec: header, query or cookie)
     oauth2: {
-      accessToken: 'token', // 固定トークン
-      // または
+      accessToken: 'token', // a static token
+      // or
       clientCredentials: { clientId: 'id', clientSecret: 'secret', scopes: ['read'], tokenUrl: '/oauth/token' },
-      // または
+      // or
       refreshToken: { refreshToken: 'rt', clientId: 'id', onRefreshed: (tokens) => save(tokens) },
     },
   },
 });
 ```
 
-- 操作の `security`（OR-of-AND）を先頭から評価し、設定済みスキームで満たせる最初の代替を適用します。`{}`（任意認証）を含む操作は未設定なら認証なしで送信し、必須認証が満たせない場合は送信前に `AuthError` を投げます。
-- 認証は middleware チェーンの最内側（transport 直前）で適用されます。
-- OAuth2 トークンは期限の 30 秒前に先回りで更新され、同時更新は 1 回にまとめられ、401 を受けたら 1 回だけ強制更新して再送します。相対の `tokenUrl` / `refreshUrl` は（相対なら上記のとおり解決した）`baseUrl` に対して解決され、絶対 URL はそのまま使われます。解決できなければ `AuthError` です。
-- `http` の bearer / basic 以外（digest など）や `mutualTLS` は生成時に警告となり、`createApiClient({ customAuth: (req, ctx) => { ... } })` で対応します。`customAuth` を設定すると、これらのスキームは「設定済み」とみなされ（適用は `customAuth` の責任）、未設定なら `AuthError` になります。
-- 操作の `security` が `components.securitySchemes` に無いスキーム名を参照していると、生成時に `unknown-security-scheme` の警告が出ます。
+- A relative `tokenUrl` / `refreshUrl` is resolved against the base URL (itself resolved as described above).
+  Absolute URLs are used as-is. If it cannot be resolved, an `AuthError` is thrown.
+- Use `createApiClient({ customAuth: (req, ctx) => { ... } })` for schemes other than HTTP bearer / basic (e.g. digest)
+  and for `mutualTLS`. When `customAuth` is set, those schemes count as configured and `customAuth` is responsible
+  for applying them. Without it they throw `AuthError`.
+- If an operation's `security` refers to a scheme that is missing from `components.securitySchemes`, an
+  `unknown-security-scheme` warning is reported at generation time.
 
-### Middleware
+#### Middleware
 
-onion 型です。登録順に外側から実行され、`createApiClient({ middleware: [...] })` または `client.use(mw)` で登録します。
+Register middleware with `createApiClient({ middleware: [...] })` or `client.use(mw)`.
 
 ```ts
-import { createApiClient, loggingMiddleware, retry401Middleware, retryMiddleware, userAgentMiddleware } from './sdk/ts/index.js';
-import type { Middleware } from './sdk/ts/index.js';
+import { createApiClient, loggingMiddleware, retry401Middleware, retryMiddleware, userAgentMiddleware } from './sdk/typescript/index.js';
+import type { Middleware } from './sdk/typescript/index.js';
 
 const timing: Middleware = async (req, next, ctx) => {
   const started = Date.now();
@@ -228,292 +358,434 @@ const timing: Middleware = async (req, next, ctx) => {
 
 const client = createApiClient({
   middleware: [
-    loggingMiddleware(), // Authorization / Cookie / Proxy-Authorization と apiKey のヘッダ・クエリをマスク
+    loggingMiddleware(),
     userAgentMiddleware('my-app/1.0'),
-    retryMiddleware({ maxAttempts: 3, baseDelayMs: 200, maxDelayMs: 5000 }), // 冪等メソッドのみ。429/503 は Retry-After を尊重
-    retry401Middleware({ onUnauthorized: async () => refreshStaticToken() }), // true を返すと 1 回だけ再送
+    retryMiddleware({ maxAttempts: 3, baseDelayMs: 200, maxDelayMs: 5000 }),
+    retry401Middleware({ onUnauthorized: async () => refreshStaticToken() }), // return true to retry once
     timing,
   ],
 });
 ```
 
-標準 middleware は `loggingMiddleware` / `userAgentMiddleware` / `retryMiddleware` / `retry401Middleware` の 4 つです。
-`CallContext`（`ctx`）は `operationName` / `method` / `pathTemplate` / `tags` / `security` / `attempt` / `signal` / `extensions` を持ちます。
-body がストリームでリプレイ不可（`req.replayable === false`）のときは、retry 系は再送しません。
+The `CallContext` (`ctx`) contains `operationName`, `method`, `pathTemplate`, `tags`, `security`, `attempt`,
+`signal` and `extensions`.
 
-### 結果とエラー
+#### Results and errors
 
-非 2xx 応答だけが `ApiError` として `{ data: undefined, error, response }` の `error` に入って返ります（`throwOnError: true` ならこれも例外になります）。
-それ以外の `TransportError` / `AuthError` / デシリアライズ失敗（2xx 本文の `DecodeError`）は `throwOnError` に関係なく常に例外です。
+Only non-2xx responses are returned as `{ data: undefined, error, response }`, with an `ApiError` in `error`. With
+`throwOnError: true` they are thrown too. All other errors are always thrown, whatever the value of `throwOnError`.
 
-| クラス | 内容 |
-|---|---|
-| `ApiError` | 非 2xx（`throwOnError` 時のみ throw、既定は `error` で返る）。`status` / `body`（型付きエラーボディ）/ `response` |
-| `TransportError`（常に throw） | 通信失敗・タイムアウト・キャンセル。`timedOut` / `cause` |
-| `DecodeError`（2xx 本文では常に throw） | 応答のデシリアライズ失敗。`raw`（生 body）/ `response` |
-| `AuthError`（常に throw） | 必須認証が未設定。`schemes` |
+| Class            | When                                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------- |
+| `ApiError`       | Non-2xx response. Returned by default, thrown with `throwOnError`. `status`, `body` (typed error body), `response`. |
+| `TransportError` | Network failure, timeout or cancellation. Always thrown. `timedOut`, `cause`.                |
+| `DecodeError`    | A 2xx body could not be deserialized. Always thrown. `raw` (raw body), `response`.           |
+| `AuthError`      | A required security scheme is not configured. Always thrown. `schemes`.                      |
 
-### 対応ランタイム
+#### Supported runtimes
 
-Browser / Node.js 18+ / Bun / Deno / React Native / Cloudflare Workers（ESM のみ）。グローバルの `fetch` / `Request` / `Response` /
-`Headers` / `URL` / `FormData` / `Blob` / `AbortController` だけを使います。`createApiClient({ fetch })` で `fetch` を差し替えられます。
-利用側の tsconfig は `strict: true`, `target: ES2022`, `lib: ["ES2022", "DOM"]`, `module: "NodeNext"` を想定しています。
+Browsers, Node.js 18+, Bun, Deno, React Native and Cloudflare Workers (ESM only). The SDK uses only the global
+`fetch`, `Request`, `Response`, `Headers`, `URL`, `FormData`, `Blob` and `AbortController`. To use a different
+`fetch`, pass `createApiClient({ fetch })`. The generated code assumes a consumer tsconfig with `strict: true`,
+`target: "ES2022"`, `lib: ["ES2022", "DOM"]` and `module: "NodeNext"`.
 
-### 既知の制約
+#### Known limitations
 
-- 認証情報を持つリクエストのリダイレクトで資格情報を外す処理（§8.5）は、ブラウザ / React Native ではベストエフォートです（リダイレクトをプラットフォームが追従するため）。
-- `timeout` はレスポンスヘッダの到着までを対象にします。ヘッダ受信後に中断しても本文の読み込みはキャンセルされません。
-- TypeScript の判別可能 union で絞り込むには、spec 側で判別プロパティがリテラル（`const` / 単一値の `enum`）になっている必要があります。
-- middleware / オプション名は spec §6.2 の表記と異なります（`loggingMiddleware`、`retryMiddleware` の `baseDelayMs` など）。
+- In browsers and React Native, removing credentials on cross-origin redirects is best effort, because the platform
+  follows redirects itself.
+- `timeout` only covers the time until the response headers arrive. Aborting after the headers have arrived does
+  not cancel reading the body.
+- To narrow a TypeScript discriminated union, the discriminator property must be a literal in the spec (`const` or
+  a single-value `enum`).
+- The TypeScript plugin does not yet support a `bigint` option for int64, `naming.property` / `hooks.propertyName`,
+  or `naming.file` / `hooks.fileName`.
 
-## 生成された C# SDK の使い方
+### C#
 
-.NET 10（`net10.0`）向けで、依存は BCL のみです。JSON は System.Text.Json の source generation を使うので AOT / トリミングに対応します。
+Targets .NET 10 (`net10.0`) and depends only on the BCL. JSON uses System.Text.Json source generation, so the SDK
+works with AOT and trimming.
 
-```
+```text
 csharp/
-  Natsuneko.Api.csproj        # package: false なら出力しない
+  SwaggerPetstore.csproj      # skipped with package: false
   ApiClient.cs                # ApiClient / ApiClientOptions
-  ApiAuth.cs                  # スキーム名ごとの型付き認証設定
-  ApiJsonContext.cs           # JsonSerializerContext（[JsonSerializable] の一覧）
-  Models/*.cs                 # schema ごとに 1 ファイル（inline の object / enum / union は {Parent}{Prop} で巻き上げ）
-  Services/<Group>Service.cs  # タグ（group）ごとのサービス
-  Core/*.cs                   # ランタイム（runtimes/csharp/src のコピー）
+  ApiAuth.cs                  # typed auth settings per security scheme
+  ApiJsonContext.cs           # JsonSerializerContext
+  Models/*.cs                 # one file per schema (inline objects / enums / unions are hoisted as {Parent}{Prop})
+  Services/<Group>Service.cs  # one service per tag
+  Core/*.cs                   # the runtime
 ```
 
 ```csharp
-using Natsuneko.Api;
-using Natsuneko.Api.Core;
+using SwaggerPetstore;
+using SwaggerPetstore.Core;
 
 var client = new ApiClient(new ApiClientOptions
 {
-    BaseUrl = "https://api.natsuneko.com",          // 既定は servers[0]（ApiClient.DefaultBaseUrl）
-    Auth = new ApiAuth { BearerAuth = "token" },    // 文字列、または new TokenValue(ct => ...)
+    BaseUrl = "https://petstore.example.com/v1",   // defaults to servers[0] (ApiClient.DefaultBaseUrl)
+    Auth = new ApiAuth { BearerAuth = "token" },   // a string, or new TokenValue(ct => ...)
     Timeout = TimeSpan.FromSeconds(30),
     Middleware = { new RetryMiddleware(), new UserAgentMiddleware("my-app/1.0") },
 });
 
-var status = await client.Catalyst.GetCatalystV1StatusByIdAsync("123");            // 成功ボディを返す
-var result = await client.Catalyst.GetCatalystV1StatusByIdWithResponseAsync("123"); // StatusCode / Headers / Url / Data
+Pet pet = await client.Pets.ShowPetByIdAsync("1");                  // returns the success body
+var result = await client.Pets.ShowPetByIdWithResponseAsync("1");    // StatusCode / Headers / Url / Data
 ```
 
-- 引数は path → 必須 body → 必須 query / header / cookie → 任意（`= null`）→ `RequestOptions? requestOptions` → `CancellationToken`。名前付き引数で任意パラメータを指定できます。
-- 非 2xx は常に例外です: `ApiException<T>`（そのステータスで宣言された型の `Body`。`404` → `4XX` → `default` の順に探す）、宣言が無い / ボディが壊れている場合は `ApiException`（`StatusCode` / `Headers` / `RawBody` / `Url`）。通信失敗・タイムアウトは `ApiTransportException`（`TimedOut`）、2xx ボディのデコード失敗は `ApiDecodeException`（`RawBody`）、必須認証の未設定は送信前に `ApiAuthException`（`Schemes`）。呼び出し側のキャンセルは `OperationCanceledException` です。
-- 認証は `ApiAuth` のプロパティ（スキーム名の PascalCase）に設定します: bearer / apiKey は `TokenValue`、basic は `BasicValue`、OAuth2 / OpenID Connect は `OAuth2Value { AccessToken | ClientCredentials | RefreshToken }`。OAuth2 のトークンは期限 30 秒前に先回り更新、同時取得は 1 回にまとめ、管理トークンで 401 を受けたら 1 回だけ更新して再送します。未対応スキーム（digest、mutualTLS）は `ClientOptions.CustomAuth` で扱います。
-- Middleware は `IApiMiddleware`（`InvokeAsync(request, next, context, cancellationToken)`）か `ApiMiddleware.Create((req, next, ctx, ct) => ...)` で作り、`Middleware` に登録するか `client.Use(...)` で追加します。登録順に外側から実行され、認証は最内側で適用されます。標準: `LoggingMiddleware`（資格情報をマスク）/ `UserAgentMiddleware` / `RetryMiddleware` / `Retry401Middleware`。
-- 独自の `HttpClient`（`ClientOptions.HttpClient`）は、ハンドラを `AllowAutoRedirect = false` / `UseCookies = false` にしてください。リダイレクトはランタイムが手動で追い、別オリジンへ移るときは `Authorization` / `Cookie` / API キーを外します。
+- Parameter order: path → required body → required query / header / cookie → optional (`= null`) →
+  `RequestOptions? requestOptions` → `CancellationToken`. Use named arguments for optional parameters.
+- Non-2xx responses always throw. `ApiException<T>` has a typed `Body` when the status has a declared body (looked up
+  as `404` → `4XX` → `default`). Otherwise, or if the body is malformed, `ApiException` is thrown (`StatusCode`,
+  `Headers`, `RawBody`, `Url`). Network failures and timeouts throw `ApiTransportException` (`TimedOut`). 2xx decode
+  failures throw `ApiDecodeException` (`RawBody`). A missing required scheme throws `ApiAuthException` (`Schemes`)
+  before sending. Caller cancellation throws `OperationCanceledException`.
+- Auth: set the `ApiAuth` properties (the scheme names in PascalCase). Bearer / API keys take `TokenValue`, basic takes
+  `BasicValue`, and OAuth2 / OpenID Connect take `OAuth2Value { AccessToken | ClientCredentials | RefreshToken }`.
+  Use `ClientOptions.CustomAuth` for unsupported schemes.
+- Middleware: implement `IApiMiddleware` (`InvokeAsync(request, next, context, cancellationToken)`) or use
+  `ApiMiddleware.Create((req, next, ctx, ct) => ...)`. Add it to `Middleware` or call `client.Use(...)`. Built-in:
+  `LoggingMiddleware`, `UserAgentMiddleware`, `RetryMiddleware`, `Retry401Middleware`.
+- If you pass your own `HttpClient` (`ClientOptions.HttpClient`), configure its handler with
+  `AllowAutoRedirect = false` and `UseCookies = false`.
 
-型の対応: `date-time` → `DateTimeOffset`、`date` → `DateOnly`、`uuid` → `Guid`、`int64` → `long`（format 無しの integer は `int`）、`binary` → `ApiFile`（`byte[]` または `Stream` + ファイル名）、未知の schema → `JsonElement`、必須プロパティは `required`、任意 / nullable は `T?`。
+**Type mapping:** `date-time` → `DateTimeOffset`, `date` → `DateOnly`, `uuid` → `Guid`, `int64` → `long` (`int` for
+integers without a format), `binary` → `ApiFile` (`byte[]` or `Stream` plus a file name), unknown schemas →
+`JsonElement`. Required properties use `required`, and optional / nullable properties use `T?`.
 
-- **enum** は未知の値を保持する構造体です（`Status.Active`、`status.Value`、`status.IsKnown`）。`switch` は `status.Value` か `==` で比較します。
-- **判別あり union** は `[JsonPolymorphic]` 基底クラス + 派生クラスです（`shape is Circle c`）。未知の判別値は基底型そのもののインスタンスになり、他のプロパティは `AdditionalProperties` に入ります（判別値そのものは System.Text.Json の制約で保持されません）。バリアント型（`Circle`）を宣言したリクエストボディは基底型経由で直列化するので判別プロパティも送られますが、モデルのプロパティがバリアント型で宣言されている場合は判別プロパティが出力されません。バリアントが複数の union に属するなど基底クラスにできない場合と、**判別なし union** は、`Value` / バリアントごとのアクセサ（`pet.Cat`）/ `Unknown`（生 JSON）を持つラッパークラスになり、バリアントを宣言順に試して最初に読めたものを採用します。
-- 任意プロパティの `null` は送信しません（「未設定」と「null」の区別はスコープ外）。空の JSON 応答（204 など）は `null`（`default`）を返します。
+- **Enums** are structs that keep unknown values (`Status.Active`, `status.Value`, `status.IsKnown`). In a `switch`,
+  match on `status.Value` or compare with `==`.
+- **Discriminated unions** are a `[JsonPolymorphic]` base class with derived classes (`shape is Circle c`). An
+  unknown discriminator value produces an instance of the base type, with the other properties in
+  `AdditionalProperties` (System.Text.Json does not keep the discriminator value itself). Request bodies declared as
+  a variant type are serialized through the base type, so the discriminator is sent. Model properties declared as a
+  variant type do not get the discriminator. When a variant cannot be a derived class (e.g. it belongs to several
+  unions), and for **non-discriminated unions**, the union is a wrapper class with `Value`, one accessor per variant
+  (`pet.Cat`) and `Unknown` (raw JSON). The variants are tried in declaration order, and the first one that parses is
+  used.
+- Optional properties that are `null` are not sent. Telling "unset" apart from "null" is not supported. Empty JSON
+  responses (e.g. 204) return `null` (`default`).
 
-## 生成された Kotlin SDK の使い方
+### Kotlin
 
-JVM 11+ / Android 向けで、依存は `io.ktor:ktor-client-core` と `org.jetbrains.kotlinx:kotlinx-serialization-json`（どちらも `api`）のみです。
-HTTP engine は利用者が選びます（JVM なら CIO / OkHttp、Android なら OkHttp / Android）。serializer は型ごとに明示しており、
-リフレクションによる探索を使わないので R8 / ProGuard でもそのまま動きます。
+Targets JVM 11+ and Android. It depends only on `io.ktor:ktor-client-core` and
+`org.jetbrains.kotlinx:kotlinx-serialization-json` (both as `api`). You choose the HTTP engine (CIO or OkHttp on the
+JVM, OkHttp or Android on Android). Serializers are referenced explicitly per type instead of being looked up by
+reflection, so the SDK works with R8 / ProGuard without extra rules.
 
-```
+```text
 kotlin/
-  build.gradle.kts, settings.gradle.kts   # package: false なら出力しない（Gradle wrapper は含めない）
-  src/main/kotlin/com/natsuneko/api/
+  build.gradle.kts, settings.gradle.kts   # skipped with package: false (no Gradle wrapper is included)
+  src/main/kotlin/swaggerpetstore/
     ApiClient.kt                          # ApiClient / ApiClientOptions
-    ApiAuth.kt                            # スキーム名ごとの型付き認証設定
-    models/*.kt                           # schema ごとに 1 ファイル
-    services/<Group>Service.kt            # タグ（group）ごとのサービス（suspend 関数）
-    core/*.kt                             # ランタイム（runtimes/kotlin のコピー、package は <packageName>.core）
+    ApiAuth.kt                            # typed auth settings per security scheme
+    models/*.kt                           # one file per schema
+    services/<Group>Service.kt            # one service per tag (suspend functions)
+    core/*.kt                             # the runtime (package <packageName>.core)
 ```
 
 ```kotlin
-import com.natsuneko.api.ApiAuth
-import com.natsuneko.api.ApiClient
-import com.natsuneko.api.core.RetryMiddleware
-import com.natsuneko.api.core.TokenValue
+import swaggerpetstore.ApiAuth
+import swaggerpetstore.ApiClient
+import swaggerpetstore.core.RetryMiddleware
+import swaggerpetstore.core.TokenValue
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import kotlin.time.Duration.Companion.seconds
 
 val client = ApiClient {
-    baseUrl = "https://api.natsuneko.com"           // 既定は servers[0]（ApiClient.DEFAULT_BASE_URL）
-    httpClient = HttpClient(CIO)                     // 省略すると classpath 上の engine で作る
-    auth = ApiAuth(bearerAuth = TokenValue("token")) // または TokenValue { fetchToken() }（送信のたびに呼ばれる）
+    baseUrl = "https://petstore.example.com/v1"      // defaults to servers[0] (ApiClient.DEFAULT_BASE_URL)
+    httpClient = HttpClient(CIO)                     // if omitted, uses the engine found on the classpath
+    auth = ApiAuth(bearerAuth = TokenValue("token")) // or TokenValue { fetchToken() } (called for every request)
     timeout = 30.seconds
     middleware.add(RetryMiddleware())
 }
 
-val status = client.catalyst.getCatalystV1StatusById("123")              // 成功ボディを返す
-val result = client.catalyst.getCatalystV1StatusByIdWithResponse("123")  // statusCode / headers / url / data
-client.close()  // SDK が作った HttpClient だけを閉じる
+val pet = client.pets.showPetById("1")                   // returns the success body
+val result = client.pets.showPetByIdWithResponse("1")    // statusCode / headers / url / data
+client.close()  // closes only an HttpClient the SDK created itself
 ```
 
-- 引数は path → 必須 body → 必須 query / header / cookie → 任意（`= null`）→ `requestOptions: RequestOptions? = null`。名前付き引数で任意パラメータを指定できます。no-content の操作は `Unit` を返します。
-- 非 2xx は常に `ApiException`（`statusCode` / `headers` / `rawBody` / `url`）です。宣言された型のボディは `error.bodyAs<NotFoundError>()` で取り出します（Kotlin の例外は型パラメータを持てないため、C# と違い非ジェネリック）。通信失敗・タイムアウトは `ApiTransportException`（`timedOut`）、2xx ボディのデコード失敗は `ApiDecodeException`（`rawBody`）、必須認証の未設定は送信前に `ApiAuthException`（`schemes`）。コルーチンのキャンセルは `CancellationException` のまま伝わります。
-- 認証は `ApiAuth` のプロパティ（スキーム名の camelCase）に設定します: bearer / apiKey は `TokenValue`、basic は `BasicValue`、OAuth2 / OpenID Connect は `OAuth2Value(accessToken | clientCredentials | refreshToken)`。OAuth2 のトークンは期限 30 秒前に先回り更新、同時取得は 1 回にまとめ（1 つの呼び出しをキャンセルしても他は巻き込まない）、管理トークンで 401 を受けたら 1 回だけ更新して再送します。未対応スキームは `customAuth` で扱います。
-- Middleware は `Middleware { request, next, context -> next(request) }`（`fun interface`）で作り、`middleware` に登録するか `client.use(...)` で追加します。登録順に外側から実行され、認証は最内側で適用されます。標準: `LoggingMiddleware`（資格情報をマスク）/ `UserAgentMiddleware` / `RetryMiddleware` / `Retry401Middleware`。
-- 渡した `HttpClient` は `config { followRedirects = false; expectSuccess = false }` の派生クライアントで使うので、自動リダイレクトや `expectSuccess` を設定済みでも構いません。リダイレクトはランタイムが手動で追い、別オリジンへ移るときは `Authorization` / `Cookie` / API キーを外します。`client.close()` は渡した `HttpClient` を閉じません。
+- Parameter order: path → required body → required query / header / cookie → optional (`= null`) →
+  `requestOptions: RequestOptions? = null`. Use named arguments for optional parameters. Operations without content
+  return `Unit`.
+- Non-2xx responses always throw `ApiException` (`statusCode`, `headers`, `rawBody`, `url`). Read a declared error
+  body with `error.bodyAs<NotFoundError>()`. Kotlin exceptions cannot be generic, so unlike C# the exception class
+  has no type parameter. Network failures and timeouts throw `ApiTransportException` (`timedOut`). 2xx decode
+  failures throw `ApiDecodeException` (`rawBody`). A missing required scheme throws `ApiAuthException` (`schemes`)
+  before sending. Coroutine cancellation propagates as `CancellationException`.
+- Auth: set the `ApiAuth` properties (the scheme names in camelCase). Bearer / API keys take `TokenValue`, basic takes
+  `BasicValue`, and OAuth2 / OpenID Connect take `OAuth2Value(accessToken | clientCredentials | refreshToken)`.
+  Cancelling one call does not cancel a token fetch that other calls share. Use `customAuth` for unsupported
+  schemes.
+- Middleware: `Middleware { request, next, context -> next(request) }` (a `fun interface`). Add it to `middleware` or
+  call `client.use(...)`. Built-in: `LoggingMiddleware`, `UserAgentMiddleware`, `RetryMiddleware`,
+  `Retry401Middleware`.
+- The SDK uses the `HttpClient` you pass through a derived client
+  (`config { followRedirects = false; expectSuccess = false }`), so your client can have any redirect or
+  `expectSuccess` setting. `client.close()` does not close an `HttpClient` you passed in.
 
-型の対応: `date-time` / `date` / `uuid` / `uri` / `byte` → `String`（`typeMappings` で差し替え可）、`int64` → `Long`（format 無しの integer は `Int`）、`binary` → `ApiFile`（`ByteArray` + ファイル名 + Content-Type）、未知の schema → `JsonElement`、任意プロパティは `T? = null`、必須 + nullable は `T?`（既定値なし）。
+**Type mapping:** `date-time` / `date` / `uuid` / `uri` / `byte` → `String` (change it with `typeMappings`), `int64`
+→ `Long` (`Int` for integers without a format), `binary` → `ApiFile` (`ByteArray` plus file name and Content-Type),
+unknown schemas → `JsonElement`. Optional properties are `T? = null`. Required nullable properties are `T?` with no
+default.
 
-- **enum** は未知の値を保持するクラスです（`Status.Active`、`status.value`、`status.isKnown`、`Status.knownValues`）。`enum class` では未知の値を再送できないためで、`when (status) { Status.Active -> … else -> … }` のように `else` が必要です（前方互換のため）。
-- **union** は `sealed interface` です。名前付き object のバリアントはそのデータクラス自身が実装し（`data class Cat(…) : Pet`、1 つのクラスが複数の union を実装できる）、それ以外は入れ子のラッパー（`Pet.StringValue(value)`、`Pet.CatList(value)`）になります。**判別あり** は判別値でバリアントを選び、**判別なし** はバリアントを宣言順に試して最初に読めたものを採用します。どれにも当たらなければ `Pet.Unknown(raw)` に生 JSON をそのまま（未知の判別値も含めて）保持します。判別プロパティはバリアントに残り、既定値（タグ）を持つので書かなくても送られます（`Circle(radius = 1.0)`）。
-- 任意プロパティの `null` は送信しません。宣言型が non-null の成功応答が空（204 など）のときは `null` ではなく `ApiDecodeException` になります（schema が nullable なら `null`）。
-- additionalProperties とプロパティを両方持つ object の追加プロパティは保持しません（プロパティの無い object は `Map<String, T>`）。
+- **Enums** are classes that keep unknown values (`Status.Active`, `status.value`, `status.isKnown`,
+  `Status.knownValues`). An `enum class` could not send unknown values back. For forward compatibility, `when`
+  needs an `else` branch.
+- **Unions** are `sealed interface`s. A named object variant's data class implements the interface itself
+  (`data class Cat(…) : Pet`; one class can implement several unions). Other variants are nested wrappers
+  (`Pet.StringValue(value)`, `Pet.CatList(value)`). Discriminated unions pick the variant from the discriminator.
+  Non-discriminated unions try the variants in declaration order and use the first one that parses. Anything else
+  becomes `Pet.Unknown(raw)` with the raw JSON. The discriminator property stays on the variant and has the tag as
+  its default value (`Circle(radius = 1.0)`).
+- Optional properties that are `null` are not sent. An empty success response (e.g. 204) for a non-null declared
+  type throws `ApiDecodeException`. If the schema is nullable, the result is `null`.
+- Additional properties are not kept on objects that also declare properties. Objects with no declared properties
+  become `Map<String, T>`.
 
-生成した SDK は利用者の Gradle でビルドします。このリポジトリでは `runtimes/kotlin/gradlew -p <出力先> build` で試せます。
+Build the generated SDK with your own Gradle setup.
 
-## 生成された Swift SDK の使い方
+### Swift
 
-Swift 6（tools-version 6.0、Swift 6 言語モード）向けの SwiftPM パッケージで、依存は Foundation のみです（Linux では `FoundationNetworking`）。
-macOS 12 / iOS 15 / tvOS 15 / watchOS 8 / visionOS 1 以降と Linux で動きます。公開型はすべて `Sendable` です。
+A SwiftPM package for Swift 6 (tools version 6.0, Swift 6 language mode) that depends only on Foundation
+(`FoundationNetworking` on Linux). It runs on macOS 12, iOS 15, tvOS 15, watchOS 8, visionOS 1 or later, and on Linux.
+All public types are `Sendable`.
 
-```
+```text
 swift/
-  Package.swift                          # package: false なら出力しない
+  Package.swift                          # skipped with package: false
   Sources/<Module>/ApiClient.swift        # ApiClient
-  Sources/<Module>/ApiAuth.swift          # スキーム名ごとの型付き認証設定
-  Sources/<Module>/Exports.swift          # @_exported import <Module>Core（ランタイムの型も import <Module> で使える）
-  Sources/<Module>/Models/*.swift         # schema ごとに 1 ファイル（inline の object / enum / union は {Parent}{Prop} で巻き上げ）
+  Sources/<Module>/ApiAuth.swift          # typed auth settings per security scheme
+  Sources/<Module>/Exports.swift          # @_exported import <Module>Core (import <Module> also exposes runtime types)
+  Sources/<Module>/Models/*.swift         # one file per schema
   Sources/<Module>/Services/<Group>Service.swift
-  Sources/<Module>Core/*.swift            # ランタイム（runtimes/swift/src のコピー）。別ターゲットなのでモデル名と衝突しない
+  Sources/<Module>Core/*.swift            # the runtime (a separate target, so it never clashes with model names)
 ```
 
-モジュール名は既定で `info.title` の PascalCase です（`swift({ moduleName: 'NatsunekoApi' })` で変更）。生成先をパスで依存に加えます。
+The module name defaults to `info.title` in PascalCase. Change it with `swift({ moduleName: 'PetstoreKit' })`. Add
+the output directory as a path dependency:
 
 ```swift
 // Package.swift
 .package(path: "sdk/swift"),
-// ターゲットの dependencies
-.product(name: "NatsunekoApi", package: "swift"),
+// in your target's dependencies
+.product(name: "SwaggerPetstore", package: "swift"),
 ```
 
 ```swift
-import NatsunekoApi
+import SwaggerPetstore
 
 let client = ApiClient(
-    baseUrl: "https://api.natsuneko.com",   // 既定は servers[0]（ApiClient.defaultBaseUrl）
-    auth: ApiAuth(bearerAuth: "token"),     // 文字列、または TokenValue(provider: { ... })
+    baseUrl: "https://petstore.example.com/v1",   // defaults to servers[0] (ApiClient.defaultBaseUrl)
+    auth: ApiAuth(bearerAuth: "token"),           // a string, or TokenValue(provider: { ... })
     timeout: 30,
     middleware: [RetryMiddleware(), UserAgentMiddleware("my-app/1.0")]
 )
 
-let status = try await client.catalyst.getCatalystV1StatusById(id: "123")             // 成功ボディを返す
-let result = try await client.catalyst.getCatalystV1StatusByIdWithResponse(id: "123")  // statusCode / headers / url / data
+let pet = try await client.pets.showPetById(petId: "1")                 // returns the success body
+let result = try await client.pets.showPetByIdWithResponse(petId: "1")  // statusCode / headers / url / data
 ```
 
-- 引数ラベルはパラメータ名の camelCase で、順序は path → 必須 `body:` → 必須 query / header / cookie → 任意（`= nil`）→ `options: RequestOptions?`。
-- 非 2xx は `ApiError` を throw します（`statusCode` / `headers` / `url` / `rawBody`）。そのステータスで宣言された型のボディは `error.body(as: NotFoundError.self)` で取り出します（`404` → `4XX` → `default` の順に探し、デコードできなければ `nil`）。通信失敗・タイムアウトは `TransportError`（`timedOut`）、2xx ボディのデコード失敗は `DecodeError`（`rawBody`）、必須認証の未設定は送信前に `AuthError`（`schemes`）、パスパラメータの欠落などは `ArgumentError`。呼び出し側の Task キャンセルは `CancellationError` です。
-- 認証は `ApiAuth` のプロパティ（スキーム名の camelCase）に設定します: bearer / apiKey は `TokenValue`、basic は `BasicValue`、OAuth2 / OpenID Connect は `OAuth2Value(accessToken:clientCredentials:refreshToken:)`。トークンの先回り更新・single-flight（actor）・401 での 1 回の再送は TypeScript / C# と同じです。未対応スキームは `customAuth: { request, context in ... }` で扱います。
-- Middleware は `Middleware` プロトコル（`intercept(_:context:next:)`）か `ClosureMiddleware { request, context, next in ... }` で作り、`middleware:` に渡すか `client.use(...)` で追加します。標準: `LoggingMiddleware`（資格情報をマスク）/ `UserAgentMiddleware` / `RetryMiddleware(RetryOptions)` / `Retry401Middleware`。
-- 送信は `HTTPTransport`（既定は Cookie・キャッシュ無効で自動リダイレクトしない `URLSessionTransport`）です。独自の `URLSession` を使うときは `URLSessionTransport(session:)` に、リダイレクトを追わない（`willPerformHTTPRedirection` で `nil` を返す）デリゲートを持つセッションを渡してください。リダイレクトはランタイムが手動で追い、別オリジンへ移るときは `Authorization` / `Cookie` / API キーを外します。
+- Argument labels are the parameter names in camelCase. Order: path → required `body:` → required query / header /
+  cookie → optional (`= nil`) → `options: RequestOptions?`.
+- Non-2xx responses throw `ApiError` (`statusCode`, `headers`, `url`, `rawBody`). Read a declared error body with
+  `error.body(as: NotFoundError.self)`. It is looked up as `404` → `4XX` → `default`, and returns `nil` if the body
+  cannot be decoded. Network failures and timeouts throw `TransportError` (`timedOut`). 2xx decode failures throw
+  `DecodeError` (`rawBody`). A missing required scheme throws `AuthError` (`schemes`) before sending, and invalid
+  arguments such as a missing path parameter throw `ArgumentError`. Task cancellation throws `CancellationError`.
+- Auth: set the `ApiAuth` properties (the scheme names in camelCase). Bearer / API keys take `TokenValue`, basic takes
+  `BasicValue`, and OAuth2 / OpenID Connect take `OAuth2Value(accessToken:clientCredentials:refreshToken:)`. Token
+  fetches are single-flight through an actor. Use `customAuth: { request, context in ... }` for unsupported schemes.
+- Middleware: conform to the `Middleware` protocol (`intercept(_:context:next:)`) or use
+  `ClosureMiddleware { request, context, next in ... }`. Pass it to `middleware:` or call `client.use(...)`. Built-in:
+  `LoggingMiddleware`, `UserAgentMiddleware`, `RetryMiddleware(RetryOptions)`, `Retry401Middleware`.
+- Requests go through an `HTTPTransport`. The default is a `URLSessionTransport` with cookies and caching disabled
+  that does not follow redirects automatically. To use your own `URLSession`, pass it to
+  `URLSessionTransport(session:)`, and give it a delegate that does not follow redirects (return `nil` from
+  `willPerformHTTPRedirection`).
 
-型の対応: `date-time` → `Date`（RFC 3339、小数秒とオフセット対応）、`date` → `CalendarDate`（ランタイムの年月日型）、`uuid` → `UUID`、`int64` → `Int64`（`int32` は `Int32`、format 無しは `Int`）、`byte` → `Data`、`binary` → `ApiFile`（`Data` + ファイル名 + Content-Type。リクエスト / レスポンスの binary body は `Data`）、未知の schema → `JSONValue`、任意 / nullable は `T?`。モデルは `Codable, Hashable, Sendable` の struct で、全プロパティを引数に取るイニシャライザを持ちます。
+**Type mapping:** `date-time` → `Date` (RFC 3339, with fractional seconds and offsets), `date` → `CalendarDate` (a
+year-month-day type in the runtime), `uuid` → `UUID`, `int64` → `Int64` (`int32` → `Int32`, `Int` without a format),
+`byte` → `Data`, `binary` → `ApiFile` (`Data` plus file name and Content-Type; binary request / response bodies are
+`Data`), unknown schemas → `JSONValue`. Optional / nullable properties are `T?`. Models are
+`Codable, Hashable, Sendable` structs with a memberwise initializer.
 
-- **enum** は既知値の case と `unknown(String)`（数値 enum は `unknown(Int)` / `unknown(Double)`）を持ち、`rawValue` / `isKnown` / `allCases` を提供します。整数値の case は `_1` のようになります。
-- **union** は関連値付きの `indirect enum` です（`case .circle(let c)`）。判別ありは判別値で、判別なしは宣言順に試して最初に読めたバリアントになり、どれにも当てはまらなければ `unknown(JSONValue)` で生 JSON を保持します。判別プロパティはバリアントの struct に残り、`const` / 単一値 enum ならイニシャライザの既定値になります（`Circle(radius: 1)`）。
-- 値型が自分自身を値で含む循環（`Node.parent: Node?`、`A.b` ↔ `B.a`）は、該当プロパティをランタイムの `Indirect` に格納します（公開されるのは通常のプロパティです）。
-- 他言語との意図的な差分: Foundation の `URL` が受け付けない `|` `[` `]` は path / query で常に percent-encode します（`piped=1%7C2`、`filter%5Bstatus%5D=active`。サーバーでデコードした値は同じ）。空の JSON 応答（204 など）は戻り値型が Optional なら `nil`、そうでなければ `DecodeError` です。JSON の直列化はキー順を宣言順に保つためランタイムの `JSONValueEncoder` / `ApiJSON` を使い（`JSONEncoder` はキー順を保持しません）、デコードは `JSONDecoder` です。
+- **Enums** have one case per known value plus `unknown(String)` (`unknown(Int)` / `unknown(Double)` for numeric
+  enums), and provide `rawValue`, `isKnown` and `allCases`. Integer cases look like `_1`.
+- **Unions** are `indirect enum`s with associated values (`case .circle(let c)`). Discriminated unions pick the
+  variant from the discriminator. Non-discriminated unions try the variants in declaration order and use the first
+  one that parses. Anything else becomes `unknown(JSONValue)`. The discriminator property stays on the variant
+  struct and is the initializer's default value when it is a `const` or a single-value enum (`Circle(radius: 1)`).
+- Value types that contain themselves (`Node.parent: Node?`, or `A.b` ↔ `B.a`) store the property in the runtime's
+  `Indirect` box. The public API is still a regular property.
+- Intentional differences from the other SDKs: `|`, `[` and `]` are always percent-encoded in paths and queries,
+  because Foundation's `URL` rejects them (`piped=1%7C2`, `filter%5Bstatus%5D=active`). The server decodes them to
+  the same values. An empty JSON response (e.g. 204) is `nil` for optional return types and a `DecodeError`
+  otherwise. JSON is encoded with the runtime's `JSONValueEncoder` / `ApiJSON` to keep keys in declaration order
+  (`JSONEncoder` does not). Decoding uses `JSONDecoder`.
 
-## 生成された Rust SDK の使い方
+### Rust
 
-stable Rust（edition 2021、1.88 以降。依存の `url` / `icu_*` が 1.88 を要求するため）向けで、依存は `reqwest`（`default-features = false`）/ `serde` / `serde_json`（`preserve_order`）/
-`tokio`（`time` / `sync` のみ）です。TLS は feature で選びます（既定 `rustls`、`--no-default-features --features native-tls` で native-tls）。
-非同期ランタイムは tokio を前提にしますが、SDK 自身はタスクを spawn しません。
+Targets stable Rust 1.88+ (edition 2021; the `url` / `icu_*` dependencies require 1.88). It depends on `reqwest`
+(`default-features = false`), `serde`, `serde_json` (`preserve_order`) and `tokio` (`time` and `sync` only). Select
+TLS with features: `rustls` by default, or `--no-default-features --features native-tls`. The SDK expects a tokio
+runtime but never spawns tasks itself.
 
-```
+```text
 rust/
-  Cargo.toml                  # package: false なら出力しない
+  Cargo.toml                  # skipped with package: false
   src/
     lib.rs                    # pub use ApiClient / ApiClientBuilder / ApiAuth
-    client.rs  auth.rs        # クライアントとビルダー、スキーム名ごとの型付き認証設定
-    models/*.rs               # schema ごとに 1 ファイル（models::Pet のように再エクスポート）
-    services/<group>.rs       # タグ（group）ごとのサービス、操作ごとのリクエストビルダーとエラー enum
-    core/*.rs                 # ランタイム（runtimes/rust/src のコピー）
+    client.rs  auth.rs        # client and builder, typed auth settings per security scheme
+    models/*.rs               # one file per schema (re-exported, e.g. models::Pet)
+    services/<group>.rs       # one service per tag, a request builder and an error enum per operation
+    core/*.rs                 # the runtime
 ```
 
 ```rust
 use std::time::Duration;
 
-use natsuneko_laboratory_api::core::{RetryMiddleware, TokenValue};
-use natsuneko_laboratory_api::{ApiAuth, ApiClient};
+use swagger_petstore::core::{RetryMiddleware, TokenValue};
+use swagger_petstore::{ApiAuth, ApiClient};
 
 let client = ApiClient::builder()
-    .base_url("https://api.natsuneko.com")                                // 既定は servers[0]（ApiClient::DEFAULT_BASE_URL）
-    .auth(ApiAuth { bearer_auth: Some("token".into()), ..Default::default() }) // または TokenValue::provider(|| async { fetch_token().await })
+    .base_url("https://petstore.example.com/v1")       // defaults to servers[0] (ApiClient::DEFAULT_BASE_URL)
+    .auth(ApiAuth { bearer_auth: Some("token".into()), ..Default::default() }) // or TokenValue::provider(|| async { fetch_token().await })
     .timeout(Duration::from_secs(30))
     .middleware(RetryMiddleware::new())
     .build();
 
-let status = client.catalyst().get_catalyst_v1_status_by_id("123").await?;      // ApiResponse<T>: status / headers / url / data
-let posts = client.catalyst().get_catalyst_v11_timeline_album_by_id("album").limit(20).send().await?; // 任意パラメータは setter
+let pet = client.pets().show_pet_by_id("1").await?;          // ApiResponse<Pet>: status / headers / url / data
+let pets = client.pets().list_pets().limit(20).send().await?; // optional parameters are builder setters
 ```
 
-- 必須パラメータ（path → 必須 body → 必須 query / header / cookie）はメソッドの引数（`impl Into<T>`）、任意パラメータはビルダーの同名 setter です。ビルダーは `.await`（`IntoFuture`）か `.send().await` で送ります。`.request_options(RequestOptions::new().header(…))` で呼び出しごとのヘッダ・extensions・base URL を指定できます。`ApiClient` の clone は安価で、clone 同士はコネクションプール・middleware・トークンを共有します。
-- 結果は `Result<ApiResponse<T>, core::Error<E>>` です。非 2xx は `Error::Api`（`status` / `headers` / `url` / `raw_body` / `body`）で、`body` には操作ごとのエラー enum（`GetErrorError::Status404(NotFoundError)`、範囲は `Status4xx`、`default` は `Default`）に宣言どおりデコードできたときだけ値が入ります。宣言の無い操作の `E` は `()` です。通信失敗・タイムアウトは `Error::Transport`（`timed_out`）、2xx ボディのデコード失敗は `Error::Decode`（`raw_body`）、必須認証の未設定は送信前に `Error::Auth`（`schemes`）、組み立てられないリクエスト（必須 path の欠落、CR / LF を含むヘッダ、相対 base URL）は `Error::InvalidRequest` です。キャンセルは future の drop です。
-- 認証は `ApiAuth` のフィールド（スキーム名の snake_case）に設定します: bearer / apiKey は `TokenValue`、basic は `BasicValue`、OAuth2 / OpenID Connect は `OAuth2Value`（`access_token` / `client_credentials` / `refresh_token`）。トークンは期限 30 秒前に先回り更新、同時取得は 1 回にまとめ、管理トークンで 401 を受けたら 1 回だけ更新して再送します。未対応スキームは `custom_auth` で扱います。
-- Middleware は `core::Middleware` トレイトを実装するか、`middleware_fn(|req, ctx, next| Box::pin(async move { next.run(req).await }))` で作り、ビルダーの `middleware(...)` か `client.use_middleware(...)` で登録します。登録順に外側から実行され、認証は最内側で適用されます（`next` は `Copy` なので何度でも呼べます）。標準: `LoggingMiddleware`（資格情報をマスク）/ `UserAgentMiddleware` / `RetryMiddleware` / `Retry401Middleware`。
-- `reqwest::Client` は後から設定を変えられないため、渡す場合は `core::http_client_builder()`（リダイレクト無効）から作ってください。リダイレクトはランタイムが手動で追い、別オリジンへ移るときは `Authorization` / `Cookie` / API キー（ヘッダ・クエリ）を外します。リダイレクトを追う Client を渡すと reqwest 自身の挙動（`Authorization` / `Cookie` は外すが API キーは残る）になります。
+- Required parameters (path → required body → required query / header / cookie) are method arguments
+  (`impl Into<T>`). Optional parameters are setters on the request builder with the same name. Send a request with
+  `.await` (`IntoFuture`) or `.send().await`. Use `.request_options(RequestOptions::new().header(…))` for per-call
+  headers, extensions and base URL. Cloning `ApiClient` is cheap, and clones share the connection pool, middleware
+  and tokens.
+- Results are `Result<ApiResponse<T>, core::Error<E>>`. Non-2xx responses are `Error::Api` (`status`, `headers`,
+  `url`, `raw_body`, `body`). `body` holds the operation's error enum (`ShowPetByIdError::Default(Error)`,
+  `Status404(...)`, `Status4xx(...)`), but only when the body decodes as declared. Operations with no declared errors
+  have `E = ()`. Network failures and timeouts are `Error::Transport` (`timed_out`). 2xx decode failures are
+  `Error::Decode` (`raw_body`). A missing required scheme is `Error::Auth` (`schemes`) before sending. Requests that
+  cannot be built (a missing required path parameter, a header containing CR / LF, a relative base URL) are
+  `Error::InvalidRequest`. To cancel a request, drop its future.
+- Auth: set the `ApiAuth` fields (the scheme names in snake_case). Bearer / API keys take `TokenValue`, basic takes
+  `BasicValue`, and OAuth2 / OpenID Connect take `OAuth2Value` (`access_token` / `client_credentials` /
+  `refresh_token`). Use `custom_auth` for unsupported schemes.
+- Middleware: implement the `core::Middleware` trait or use
+  `middleware_fn(|req, ctx, next| Box::pin(async move { next.run(req).await }))`. Register it with the builder's
+  `middleware(...)` or call `client.use_middleware(...)`. `next` is `Copy`, so it can be called more than once.
+  Built-in: `LoggingMiddleware`, `UserAgentMiddleware`, `RetryMiddleware`, `Retry401Middleware`.
+- A `reqwest::Client` cannot be reconfigured after it is built. If you pass your own, create it from
+  `core::http_client_builder()` (redirects disabled). If you pass a client that follows redirects, you get reqwest's
+  own behavior: it removes `Authorization` / `Cookie` but keeps API keys.
 
-型の対応: `date-time` / `date` / `uuid` / `uri` / `byte` → `String`（`typeMappings` と `package.dependencies` で `chrono` / `uuid` に差し替え可）、`int64` と format 無しの integer → `i64`（`int32` → `i32`）、`float` → `f32`、その他の number → `f64`、`binary` → `ApiFile`（`Vec<u8>` + ファイル名 + Content-Type）、未知の schema → `serde_json::Value`、additionalProperties → `HashMap<String, T>`、任意 / nullable → `Option<T>`。予約語は `r#type` のような raw identifier（`self` などは `self_`）、`Vec<T>` を挟まずに自分を含む型は `Box<T>` で持ちます。
+**Type mapping:** `date-time` / `date` / `uuid` / `uri` / `byte` → `String` (switch to `chrono` / `uuid` with
+`typeMappings` and `package.dependencies`), `int64` and integers without a format → `i64` (`int32` → `i32`), `float` →
+`f32`, other numbers → `f64`, `binary` → `ApiFile` (`Vec<u8>` plus file name and Content-Type), unknown schemas →
+`serde_json::Value`, `additionalProperties` → `HashMap<String, T>`, optional / nullable → `Option<T>`. Reserved words
+become raw identifiers such as `r#type` (`self_` for `self` and similar). Types that contain themselves without a
+`Vec<T>` in between are boxed (`Box<T>`).
 
-- **enum** は `Unknown(…)` バリアントを持つ enum です（`Status::Active`、`status.as_str()` / `priority.value()`、`is_known()`、`KNOWN_VALUES`、`From<&str>`）。未知の値も再送できます。比較は値で行います。
-- **判別あり union** は判別値でバリアントを選ぶ enum（`Shape::Circle(Circle)`）、**判別なし union** は `#[serde(untagged)]` の enum で、バリアントを宣言順に試して最初に読めたものを採用します。どれにも当たらなければ `Unknown(serde_json::Value)` に生 JSON をそのまま保持し、そのまま書き戻せます。判別プロパティはバリアントの構造体に残ります（`Circle { kind: "circle".into(), .. }`）。
-- 任意プロパティの `None` は送信しません。宣言型が `Option` でない成功応答が空（204 など）のときは `Error::Decode` になります。
-- multipart は reqwest の `multipart` ではなくランタイムが組み立てるので、リトライ・リダイレクト・401 再送でも同じ body を送り直せます。
+- **Enums** have an `Unknown(…)` variant (`Status::Active`, `status.as_str()` / `priority.value()`, `is_known()`,
+  `KNOWN_VALUES`, `From<&str>`). Unknown values can be sent back unchanged. Compare enums by value.
+- **Discriminated unions** are enums that pick the variant from the discriminator (`Shape::Circle(Circle)`).
+  **Non-discriminated unions** are `#[serde(untagged)]` enums that try the variants in declaration order and use the
+  first one that parses. Anything else becomes `Unknown(serde_json::Value)` and is written back unchanged. The
+  discriminator property stays on the variant struct (`Circle { kind: "circle".into(), .. }`).
+- Optional properties that are `None` are not sent. An empty success response (e.g. 204) for a non-`Option` type is
+  an `Error::Decode`.
+- The runtime builds multipart bodies itself instead of using reqwest's `multipart`, so the same body can be resent
+  on retries, redirects and 401 retries.
 
-生成した SDK は Cargo の path / git 依存として取り込めます（`cargo check` で確認できます）。
+Use the generated SDK as a Cargo path or git dependency.
 
-## 生成された Go SDK の使い方
+### Go
 
-Go 1.22+ 向けで、依存は標準ライブラリのみです。生成物はそのまま gofmt 済みで、`go vet` を通ります。
+Targets Go 1.22+ and depends only on the standard library. The output is already gofmt-formatted and passes
+`go vet`.
 
-```
+```text
 go/
-  go.mod                  # package: false なら出力しない
+  go.mod                  # skipped with package: false
   client.go               # Client / ClientOptions / NewClient / DefaultBaseURL
-  auth.go                 # スキーム名ごとの型付き認証設定（Auth）
-  <name>_model.go         # schema ごとに 1 ファイル（すべて同じパッケージ）
-  <group>_service.go      # タグ（group）ごとのサービスと <Method>Params
-  core/*.go               # ランタイム（runtimes/go/src のコピー、package core）
+  auth.go                 # typed auth settings per security scheme (Auth)
+  <name>_model.go         # one file per schema (all in the same package)
+  <group>_service.go      # one service per tag, plus <Method>Params
+  core/*.go               # the runtime (package core)
 ```
 
 ```go
 import (
-	"github.com/mika-f/api-go"
-	"github.com/mika-f/api-go/core"
+	"example.com/petstore"
+	"example.com/petstore/core"
 )
 
-client := natsuneko.NewClient(natsuneko.ClientOptions{
-	BaseURL:    "https://api.natsuneko.com",            // 省略すると servers[0]（natsuneko.DefaultBaseURL）
-	HTTPClient: &http.Client{Transport: myTransport},   // 省略すると http.DefaultTransport
-	Auth:       &natsuneko.Auth{BearerAuth: core.StaticToken("token")},
+client := petstore.NewClient(petstore.ClientOptions{
+	BaseURL:    "https://petstore.example.com/v1",      // defaults to servers[0] (petstore.DefaultBaseURL)
+	HTTPClient: &http.Client{Transport: myTransport},   // defaults to http.DefaultTransport
+	Auth:       &petstore.Auth{BearerAuth: core.StaticToken("token")},
 	Timeout:    30 * time.Second,
 	Middleware: []core.Middleware{core.Retry(core.RetryOptions{})},
 })
 
-status, resp, err := client.Catalyst.GetCatalystV1StatusById(ctx, natsuneko.GetCatalystV1StatusByIdParams{Id: "123"})
+pet, resp, err := client.Pets.ShowPetById(ctx, petstore.ShowPetByIdParams{PetId: "1"})
 ```
 
-- 各操作は `ctx context.Context` を第 1 引数に取り、パラメータを持つ操作は `<Method>Params` 構造体（必須は値、任意は `*T` / スライス / map。`core.Ptr(v)` でポインタを作れる）、body を持つ操作はその後ろに body（必須は値、任意は `*T` で `nil` なら送らない）、最後に `opts ...core.RequestOption`（`core.WithHeader` / `core.WithBaseURL` / `core.WithExtension`）を取ります。
-- 戻り値は `(T, *http.Response, error)`（no-content の操作は `(*http.Response, error)`）。object / union のモデルは `*T`、それ以外（スライス・スカラー・enum）は値で、204 / 空 body は nil になる型ならゼロ値です。`*http.Response` の `Body` は読み込み済みのバイト列で何度でも読め、`Request.URL` は最終 URL です。非 2xx でも `*http.Response` を返します。
-- エラーは `errors.As` で取り出します: 非 2xx は `*core.APIError`（`StatusCode` / `Header` / `RawBody` / `URL` / `Body`。宣言された型のボディは `core.ErrorBody[*NotFoundError](err)`）、通信失敗・タイムアウトは `*core.TransportError`（`Timeout`。呼び出し側の `ctx` が終わった場合は `errors.Is(err, context.Canceled)` が成り立つ）、2xx ボディのデコード失敗は `*core.DecodeError`（`RawBody`）、必須認証の未設定は送信前に `*core.AuthError`（`Schemes`）。
-- 認証は `Auth` のフィールド（スキーム名の PascalCase）に設定します: bearer / apiKey は `core.TokenProvider`（`core.StaticToken("…")` または `core.TokenFunc(func(ctx) (string, error))`、送信のたびに呼ばれる）、basic は `core.Basic{Username, Password}` / `core.BasicFunc`、OAuth2 / OpenID Connect は `&core.OAuth2{AccessToken | ClientCredentials | RefreshToken}`。トークンは期限 30 秒前に先回り更新、同時取得は 1 回にまとめ（1 つの呼び出しの `ctx` が終わっても他は巻き込まない）、管理トークンで 401 を受けたら 1 回だけ更新して再送します。未対応スキームは `CustomAuth` で扱います。
-- Middleware は `func(req *core.Request, next core.Next, ctx *core.CallContext) (*core.Response, error)` で、`ClientOptions.Middleware` に並べるか `client.Use(...)` で追加します。登録順に外側から実行され、認証は最内側で適用されます。標準: `core.Logging`（資格情報をマスク）/ `core.UserAgent` / `core.Retry` / `core.Retry401`。
-- 渡した `*http.Client` は `CheckRedirect` だけを差し替えた浅いコピーで使います（元の client は変更しません）。リダイレクトはランタイムが手動で追い、別オリジンへ移るときは `Authorization` / `Cookie` / API キーを外します。`ClientOptions` は `NewClient` でコピーされ、以後の変更は `client.Use` だけです（`Auth` はポインタなので、スキームの値を差し替えれば次の送信から使われます）。
+(Here the plugin is configured with `go({ module: 'example.com/petstore', packageName: 'petstore' })`.)
 
-型の対応: `date-time` → `time.Time`、`date` → `core.Date`（`YYYY-MM-DD`）、`uuid` / `uri` → `string`、`byte` → `[]byte`、`int64` → `int64`（`int32` → `int32`、format 無しは `int`）、`float` → `float32`、`binary` → `core.File`（`Content []byte` + `Name` + `ContentType`。`core.ReadFile(r, name, contentType)` で `io.Reader` から作る。再送できるようにメモリに保持する）、未知の schema → `json.RawMessage`。
+- Every operation takes `ctx context.Context` first. Operations with parameters then take a `<Method>Params` struct
+  (required parameters are values; optional ones are `*T`, slices or maps; `core.Ptr(v)` makes a pointer).
+  Operations with a body take it next (required bodies are values; optional bodies are `*T`, and `nil` sends no
+  body). The last argument is `opts ...core.RequestOption` (`core.WithHeader`, `core.WithBaseURL`,
+  `core.WithExtension`).
+- Operations return `(T, *http.Response, error)`, or `(*http.Response, error)` if they have no content. Object and
+  union models are returned as `*T`, and everything else (slices, scalars, enums) by value. A 204 or empty body
+  returns the zero value for types that allow it. The `*http.Response` body is already read into memory and can be
+  read any number of times, and `Request.URL` is the final URL. The `*http.Response` is returned for non-2xx
+  responses too.
+- Use `errors.As` to inspect errors. Non-2xx responses are `*core.APIError` (`StatusCode`, `Header`, `RawBody`, `URL`,
+  `Body`). Read a declared error body with `core.ErrorBody[*Error](err)`. Network failures and timeouts are
+  `*core.TransportError` (`Timeout`). If the caller's `ctx` was cancelled, `errors.Is(err, context.Canceled)` is
+  true. 2xx decode failures are `*core.DecodeError` (`RawBody`). A missing required scheme is `*core.AuthError`
+  (`Schemes`) before sending.
+- Auth: set the `Auth` fields (the scheme names in PascalCase). Bearer / API keys take a `core.TokenProvider`
+  (`core.StaticToken("…")` or `core.TokenFunc(func(ctx) (string, error))`, called for every request). Basic takes
+  `core.Basic{Username, Password}` / `core.BasicFunc`, and OAuth2 / OpenID Connect take
+  `&core.OAuth2{AccessToken | ClientCredentials | RefreshToken}`. If one caller's `ctx` ends, token fetches that other
+  callers share are not cancelled. Use `CustomAuth` for unsupported schemes.
+- Middleware: `func(req *core.Request, next core.Next, ctx *core.CallContext) (*core.Response, error)`. List it in
+  `ClientOptions.Middleware` or call `client.Use(...)`. Built-in: `core.Logging`, `core.UserAgent`, `core.Retry`,
+  `core.Retry401`.
+- The SDK uses a shallow copy of the `*http.Client` you pass, with only `CheckRedirect` replaced. Your original
+  client is not modified. `NewClient` copies `ClientOptions`, so after that only `client.Use` changes the client.
+  `Auth` is a pointer, so if you replace a scheme's value, the next request uses the new one.
 
-- **enum** は名前付き型と定数です（`type Status string`、`StatusActive`、`status.IsKnown()`）。未知の値もそのまま保持・再送できます。
-- **union** は「バリアントごとのポインタ + `Raw`」の構造体です（`Shape{Circle: &Circle{Radius: 1}}`、読み込み後は `shape.Circle != nil` で判別）。**判別あり** は判別値でバリアントを選び、**判別なし** は宣言順に試して最初に読めたものを採用します。どれにも当たらなければ `Raw` に生 JSON を保持し、書き込み時はそのまま返します。判別プロパティはバリアントに残り、空なら `MarshalJSON` がタグを補います。
-- 必須プロパティを持つ object は `UnmarshalJSON` で欠落（と non-null 必須の `null`）を検査します（`encoding/json` は検査しないため）。任意プロパティは `omitempty` なので、`nil` と空スライスは送られません。必須の object 参照は値型ですが、値型だけで循環する場合はポインタになります。
-- additionalProperties とプロパティを両方持つ object の追加プロパティは保持しません（プロパティの無い object は `map[string]T`）。
+**Type mapping:** `date-time` → `time.Time`, `date` → `core.Date` (`YYYY-MM-DD`), `uuid` / `uri` → `string`, `byte` →
+`[]byte`, `int64` → `int64` (`int32` → `int32`, `int` without a format), `float` → `float32`, `binary` → `core.File`
+(`Content []byte` + `Name` + `ContentType`; create one from an `io.Reader` with `core.ReadFile(r, name, contentType)`.
+It is kept in memory so it can be resent), unknown schemas → `json.RawMessage`.
 
-生成した SDK は `go build` / `go vet` でビルドします（`package: false` にすると既存モジュールの一部として置けます）。
+- **Enums** are named types with constants (`type Status string`, `StatusActive`, `status.IsKnown()`). Unknown values
+  are kept and sent back unchanged.
+- **Unions** are structs with one pointer per variant plus `Raw` (`Shape{Circle: &Circle{Radius: 1}}`; after
+  decoding, check `shape.Circle != nil`). Discriminated unions pick the variant from the discriminator.
+  Non-discriminated unions try the variants in declaration order and use the first one that parses. Anything else is
+  kept in `Raw` and written back unchanged. The discriminator property stays on the variant, and `MarshalJSON` fills
+  in the tag when it is empty.
+- `UnmarshalJSON` checks objects with required properties for missing values (and for `null` in non-nullable
+  required properties), because `encoding/json` does not. Optional properties are `omitempty`, so `nil` and empty
+  slices are not sent. Required object references are values. If a type contains itself only through values, the
+  reference becomes a pointer.
+- Additional properties are not kept on objects that also declare properties. Objects with no declared properties
+  become `map[string]T`.
 
-## カスタムプラグイン
+## Custom plugins
 
-`definePlugin` で作ります。依存プラグイン（ここでは `typescript`）の公開 API `symbols` から、生成済みの型名・関数名を参照できます。
+Create plugins with `definePlugin`. A plugin can depend on other plugins and use their public API. For example, the
+TypeScript plugin's `symbols` gives you the generated type and function names.
 
 ```ts
 import { defineConfig, definePlugin } from '@natsuneko-laboratory/archon';
@@ -522,13 +794,13 @@ import type { TypeScriptPluginAPI } from '@natsuneko-laboratory/archon/plugins';
 
 const operationList = definePlugin<{ output: string }>({
   name: 'operation-list',
-  dependencies: ['typescript'], // 先に実行される
-  factories: { typescript }, // 設定に無ければ既定設定で自動追加する
+  dependencies: ['typescript'], // run after the typescript plugin
+  factories: { typescript }, // added with default options if it is missing from the config
   defaults: { output: 'operation-list' },
   generate(ctx) {
     const ts = ctx.plugin<TypeScriptPluginAPI>('typescript');
     const lines = ctx.ir.operations.map((op) => `${op.id} -> ${ts.symbols.operation(op.id).functionName}`);
-    ctx.emit('operations.txt', `${lines.join('\n')}\n`); // output からの相対パス
+    ctx.emit('operations.txt', `${lines.join('\n')}\n`); // relative to the plugin's output directory
   },
 });
 
@@ -539,68 +811,29 @@ export default defineConfig({
 });
 ```
 
-`PluginDefinition` には他に `transformIR(ir, ctx)`（全プラグインの `generate` より前に IR を加工）と `irRequirements`（inline object / enum の巻き上げ指定）があります。
-`ctx` は `ir` / `options` / `config` / `diagnostics` / `emit` / `writer()`（`CodeWriter`）/ `headerLines(language)` / `plugin(name)` を提供します。
+A `PluginDefinition` can also have `transformIR(ir, ctx)`, which modifies the IR before any plugin's `generate`
+runs, and `irRequirements`, which controls hoisting of inline objects and enums. `ctx` provides `ir`, `options`,
+`config`, `diagnostics`, `emit`, `writer()` (a `CodeWriter`), `headerLines(language)` and `plugin(name)`.
 
-## ロードマップ
+## Roadmap
 
-各マイルストーンは「生成 → コンパイル → E2E 通過」で完了とします。
+- [x] Core (loader, parser, IR, passes, config, plugin API, CLI)
+- [x] TypeScript
+- [x] C# (.NET 10)
+- [x] Kotlin (JVM 11+ / Android)
+- [x] Swift 6
+- [x] Rust
+- [x] Go 1.22+
+- [ ] Ruby 3.2+
 
-| | 内容 | 状態 |
-|---|---|---|
-| M1 | コア（loader / parser / IR / passes / 設定 / プラグイン API / CLI / CodeWriter）+ TypeScript プラグイン & ランタイム + モックサーバ + E2E 基盤 | 実装済み |
-| M2 | C#（.NET 10）プラグイン & BCL のみのランタイム | 実装済み |
-| M3 | Kotlin（JVM 11+ / Android）プラグイン & ktor-client-core + kotlinx-serialization-json のみのランタイム | 実装済み |
-| M4 | Swift 6 プラグイン & Foundation のみのランタイム（Apple プラットフォーム / Linux） | 実装済み |
-| M5 | Rust（stable、edition 2021）プラグイン & reqwest + serde + serde_json + tokio のみのランタイム | 実装済み |
-| M6 | Go 1.22+ プラグイン & 標準ライブラリのみのランタイム | 実装済み |
-| M7 | Ruby 3.2+ | 未着手 |
+## Contributing
 
-M1 の TypeScript プラグインでは `bigint`（int64）オプション、`naming.property` / `hooks.propertyName` / `naming.file` / `hooks.fileName` は提供していません。
+Bug reports and pull requests are welcome on [GitHub](https://github.com/teyvat-project/Archon). See
+[CONTRIBUTING.md](https://github.com/teyvat-project/Archon/blob/main/CONTRIBUTING.md) for how to build and test the
+project. The design document is in
+[`docs/superpowers/specs`](https://github.com/teyvat-project/Archon/blob/main/docs/superpowers/specs/2026-10-25-archon-design.md)
+(in Japanese).
 
-## 開発
+## License
 
-```sh
-pnpm test        # 単体・スナップショット・生成物のコンパイルテスト（vitest）
-pnpm typecheck   # 全パッケージの tsc --noEmit
-pnpm test:e2e    # モックサーバに対して生成 SDK を実行する E2E（e2e/typescript）
-pnpm test:e2e:csharp   # 同じシナリオを生成 C# SDK で実行する E2E（e2e/csharp、要 .NET 10 SDK）
-dotnet test runtimes/csharp/tests/Archon.Runtime.Tests   # C# ランタイムの単体テスト
-pnpm test:e2e:kotlin   # 同じシナリオを生成 Kotlin SDK で実行する E2E（e2e/kotlin、要 JDK 17+）
-runtimes/kotlin/gradlew -p runtimes/kotlin test   # Kotlin ランタイムの単体テスト（Gradle wrapper 同梱）
-pnpm test:e2e:swift    # 同じシナリオを生成 Swift SDK で実行する E2E（e2e/swift、要 Swift 6.1+）
-swift test --package-path runtimes/swift                 # Swift ランタイムの単体テスト（swift-testing）
-pnpm test:e2e:rust     # 同じシナリオを生成 Rust SDK で実行する E2E（e2e/rust、要 cargo）
-cargo test --manifest-path runtimes/rust/Cargo.toml   # Rust ランタイムの単体テスト
-pnpm test:e2e:go       # 同じシナリオを生成 Go SDK で実行する E2E（e2e/go、要 Go 1.22+）
-(cd runtimes/go && go test -race ./...)   # Go ランタイムの単体テスト
-pnpm build       # 全パッケージのビルド
-pnpm -F @natsuneko-laboratory/archon-e2e-typescript smoke bun   # 生成 SDK を Bun / Deno（`smoke deno`）でモックサーバに対して実行
-```
-
-CI（`.github/workflows/ci.yml`）は上記に加え、ランタイムの単体テストを Node.js 18 / 20 / 22 / 24 で、生成 SDK のスモークを Bun / Deno で実行します。
-
-C# 生成物のコンパイルテスト（`dotnet build -warnaserror`）は .NET 10 以降の SDK が無ければスキップされます（CI では `actions/setup-dotnet` で入れて実行します）。
-Kotlin 生成物のコンパイルテスト（`gradle build`、警告をエラー扱い）は JDK 17 以降が無ければスキップされます（CI では `actions/setup-java` で入れて実行します）。
-Swift 生成物のコンパイルテスト（`swift build -Xswiftc -warnings-as-errors`）は Swift 6 以降が無ければスキップされます。Swift のランタイム単体テストと E2E は、CI で Linux（`swift:6.2` コンテナ）と macOS の両方で実行します。
-Rust 生成物のコンパイルテスト（`cargo clippy -- -D warnings`）は `cargo` が無ければスキップされます（CI では `dtolnay/rust-toolchain` で入れて実行します）。
-
-### ライブスモーク（手動）
-
-`api.natsuneko.com` に対し、認証不要または任意認証（`{}` を含む）で必須パラメータ無しの GET を最大 3 件、生成 SDK で実際に呼びます（要ネットワーク）。
-`examples/natsuneko/archon.config.ts` で一時ディレクトリに SDK を生成し、HTTP 200 と `data` が `undefined` でないことを確認して、1 件でも失敗すれば非ゼロで終了します。
-
-```sh
-node --experimental-strip-types scripts/live-smoke.ts
-```
-
-GitHub Actions の `Live smoke` ワークフロー（`workflow_dispatch` のみ）からも実行できます。
-
-`security: []` の操作を優先し、足りなければ任意認証の操作で埋めます。spec の宣言と実 API の挙動が食い違う操作は `scripts/live-smoke.ts` の `KNOWN_SPEC_MISMATCHES`（理由付きのスキップリスト）に載せて除外し、実行時に `skip` と表示します（現在は `GET /feature-flags/v1/me`: spec は認証不要だが実 API は 401）。
-natsuneko の spec で条件を満たす操作は現状 2 件（`/catalyst/v1/announcements`、任意認証の `/catalyst/v1.1/timeline/newcomers`）のみのため、2 件以上あれば成功とし、3 件未満のときはその旨を表示します。
-
-Archon のソースは `.js` 付きの相対 import を使っており Node の型除去だけでは読み込めないため、スクリプトは jiti 経由でソースと生成 SDK を読み込みます（事前の `pnpm build` は不要）。
-
-## ライセンス
-
-未定。
+[MIT](https://github.com/teyvat-project/Archon/blob/main/LICENSE)
