@@ -7,7 +7,8 @@
     "test": "vitest run",
     "test:e2e": "pnpm -F @natsuneko-laboratory/archon-e2e-typescript test",
     "typecheck": "pnpm -r typecheck",
-    "build": "pnpm -r build"
+    "build": "pnpm -r build",
+    "test:e2e:csharp": "pnpm -F @natsuneko-laboratory/archon-e2e-csharp test"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
