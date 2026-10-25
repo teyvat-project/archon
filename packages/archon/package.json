@@ -1,6 +1,6 @@
 {
   "name": "@natsuneko-laboratory/archon",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Generate SDKs with minimal dependencies for TypeScript, C#, Kotlin, Swift, Rust and Go from OpenAPI 3.0 / 3.1 specs",
   "keywords": [
     "openapi",
