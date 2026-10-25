@@ -334,7 +334,7 @@ describe('typescript plugin: types.gen.ts', () => {
 
   it('emits types.gen.ts and exposes symbols', async () => {
     const { api, emitted } = await generate(doc([['foo-bar', obj([])], ['Foo.Bar', obj([])]]));
-    expect(emitted.map((f) => f.path)).toEqual(['types.gen.ts']);
+    expect(emitted[0]?.path).toBe('types.gen.ts');
     expect(api.symbols.typeOf('foo-bar')).toEqual({ name: 'FooBar', file: 'types.gen.ts' });
     expect(api.symbols.typeOf('Foo.Bar')).toEqual({ name: 'FooBar2', file: 'types.gen.ts' });
     expect(() => api.symbols.typeOf('Missing')).toThrow(ArchonError);

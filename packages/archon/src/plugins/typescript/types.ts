@@ -14,19 +14,25 @@ export type TypeNameTable = Map<string /* IR schema name */, string /* TS identi
  * named schema ごとに TS の型名を決める（`ir.schemas` の順、case-sensitive な UniqueNamer で衝突解決）。
  * `hooks.typeName` → `naming.type`（case → name テンプレート）の結果を識別子として正規化する
  * （不正文字は `_`、先頭が数字なら `_` を前置、予約語なら `_` を後置）。
+ * `reserved` の名前（ランタイムや生成コードが同じスコープで使う名前）は使わない。
  */
-export function buildTypeNameTable(ir: IRDocument, opts: TypeScriptPluginOptions): TypeNameTable {
-  const namer = new UniqueNamer();
+export function buildTypeNameTable(
+  ir: IRDocument,
+  opts: TypeScriptPluginOptions,
+  reserved: Iterable<string> = [],
+): TypeNameTable {
+  const namer = new UniqueNamer(reserved);
   const rule = opts.naming.type ?? {};
   const table: TypeNameTable = new Map();
   for (const name of ir.schemas.keys()) {
     const base = opts.hooks.typeName?.(name) ?? applyTemplate(rule.name, toCase(name, rule.case ?? 'PascalCase'));
-    table.set(name, namer.claim(sanitizeTypeName(base)));
+    table.set(name, namer.claim(sanitizeIdentifier(base)));
   }
   return table;
 }
 
-function sanitizeTypeName(name: string): string {
+/** 不正文字を `_` に置き換え、先頭が数字なら `_` を前置、予約語なら `_` を後置する。 */
+export function sanitizeIdentifier(name: string): string {
   let id = name.replace(/[^A-Za-z0-9_$]/g, '_');
   if (id === '') id = '_';
   if (/^[0-9]/.test(id)) id = `_${id}`;
@@ -183,11 +189,13 @@ function typeName(names: TypeNameTable, schemaName: string): string {
   return name;
 }
 
-function propertyKey(name: string): string {
+/** object リテラル / 型のキー。識別子として不正なら引用する。 */
+export function propertyKey(name: string): string {
   return IDENTIFIER.test(name) ? name : quote(name);
 }
 
-function quote(value: string): string {
+/** シングルクォートの文字列リテラル。 */
+export function quote(value: string): string {
   return `'${JSON.stringify(value).slice(1, -1).replaceAll('\\"', '"').replaceAll("'", "\\'")}'`;
 }
 

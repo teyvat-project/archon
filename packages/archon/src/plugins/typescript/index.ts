@@ -3,6 +3,11 @@ import type { IROperation, IRSchema } from '../../ir/types.js';
 import type { SchemaPath } from '../../ir/walk.js';
 import { definePlugin } from '../../plugin/define.js';
 import type { NameCase } from '../../writer/naming.js';
+import { CLIENT_EXPORTS, renderClient, renderIndex } from './client.js';
+import { renderPackageJson, renderTsconfig } from './package.js';
+import { readRuntime, resolveRuntimeDir, rewriteImportExtensions, runtimeExportNames } from './runtime.js';
+import { buildSdkModel, renderSdk, SDK_EXPORTS } from './sdk.js';
+import { planTransformers, renderTransformers } from './transformers.js';
 import { buildTypeNameTable, renderTypes } from './types.js';
 
 export type NamingRule = { case?: NameCase; name?: string | ((name: string) => string) };
@@ -41,6 +46,7 @@ export interface TypeScriptPluginAPI {
   symbols: {
     /** `file` は出力ディレクトリ相対（例 `'types.gen.ts'`）。 */
     typeOf(schemaName: string): { name: string; file: string };
+    /** `functionName` は class スタイルでは `'<Class>.<method>'`。include / exclude で除外した操作は不明扱い。 */
     operation(operationId: string): {
       functionName: string;
       dataType: string;
@@ -52,6 +58,14 @@ export interface TypeScriptPluginAPI {
 }
 
 const TYPES_FILE = 'types.gen.ts';
+const SDK_FILE = 'sdk.gen.ts';
+
+/**
+ * 生成コードが同じスコープで使う名前。types.gen.ts の型名にも sdk.gen.ts の操作名にも使わない
+ * （index.ts の `export *` や sdk.gen.ts の import と衝突させないため）。
+ * `AbortSignal` は sdk.gen.ts の Options が参照するグローバル型。
+ */
+const GENERATED_NAMES = [...CLIENT_EXPORTS, ...SDK_EXPORTS, 'AbortSignal'];
 
 export const typescript = definePlugin<TypeScriptPluginOptions, TypeScriptPluginAPI>({
   name: 'typescript',
@@ -68,8 +82,31 @@ export const typescript = definePlugin<TypeScriptPluginOptions, TypeScriptPlugin
   },
   irRequirements: (opts) => ({ hoistInlineObjects: false, hoistInlineEnums: opts.enums !== 'union' }),
   generate(ctx) {
-    const names = buildTypeNameTable(ctx.ir, ctx.options);
+    const opts = ctx.options;
+    const runtime = readRuntime(resolveRuntimeDir('typescript'));
+    const reserved = [...runtimeExportNames(runtime), ...GENERATED_NAMES];
+    const names = buildTypeNameTable(ctx.ir, opts, reserved);
+    const plan = opts.dates === 'Date' ? planTransformers(ctx.ir, names, opts) : undefined;
+    const sdk = buildSdkModel(ctx, [...reserved, ...names.values(), ...(plan?.named.values() ?? [])], plan);
+    const operations = new Map(sdk.operations.map((m) => [m.op.id, m.names]));
+
     ctx.emit(TYPES_FILE, renderTypes(ctx, names));
+    ctx.emit(SDK_FILE, renderSdk(ctx, sdk, names));
+    ctx.emit('client.gen.ts', renderClient(ctx));
+    if (plan) ctx.emit('transformers.gen.ts', renderTransformers(ctx, plan, sdk.extraTransformers));
+    ctx.emit('index.ts', renderIndex(ctx));
+
+    const header = ctx.writer().comment(ctx.headerLines('typescript'), 'line').toString();
+    for (const file of runtime) {
+      const source = rewriteImportExtensions(file.source, opts.importExtension);
+      ctx.emit(`core/${file.name}`, header === '' ? source : `${header}\n${source}`);
+    }
+
+    const packageJson = renderPackageJson(ctx.ir, opts);
+    const tsconfig = renderTsconfig(opts);
+    if (packageJson !== undefined) ctx.emit('package.json', packageJson);
+    if (tsconfig !== undefined) ctx.emit('tsconfig.json', tsconfig);
+
     return {
       symbols: {
         typeOf(schemaName) {
@@ -77,8 +114,18 @@ export const typescript = definePlugin<TypeScriptPluginOptions, TypeScriptPlugin
           if (name === undefined) throw new ArchonError('unknown-schema', `Unknown schema "${schemaName}".`);
           return { name, file: TYPES_FILE };
         },
-        operation() {
-          throw new ArchonError('not-implemented', 'symbols.operation is not implemented yet.');
+        operation(operationId) {
+          const n = operations.get(operationId);
+          if (n === undefined) {
+            throw new ArchonError('unknown-operation', `Unknown operation "${operationId}" (or excluded from the SDK).`);
+          }
+          return {
+            functionName: n.className === undefined ? n.method : `${n.className}.${n.method}`,
+            dataType: n.dataType,
+            responseType: n.responseType,
+            errorType: n.errorType,
+            file: SDK_FILE,
+          };
         },
       },
     };

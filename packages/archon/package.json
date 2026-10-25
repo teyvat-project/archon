@@ -15,8 +15,12 @@
       "import": "./dist/plugins.js"
     }
   },
+  "files": [
+    "dist",
+    "runtimes"
+  ],
   "scripts": {
-    "build": "tsup",
+    "build": "node scripts/copy-runtimes.mjs && tsup",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p ."
   },
