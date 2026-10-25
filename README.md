@@ -3,8 +3,9 @@
 OpenAPI 3.0 / 3.1 の仕様から、**外部依存を最小化した** SDK を生成するジェネレータ（Meta SDK）です。
 設計の詳細は [`docs/superpowers/specs/2026-10-25-archon-design.md`](docs/superpowers/specs/2026-10-25-archon-design.md) を参照してください。
 
-現在は **M2（コア + TypeScript / C# プラグイン）** まで実装済みです。生成される SDK は実行時依存ゼロ（TypeScript は `fetch` のみ、
-C# は BCL のみ）で、手書きのランタイムは生成物の `core/`（C# は `Core/`）にそのままコピーされます。
+現在は **M3（コア + TypeScript / C# / Kotlin プラグイン）** まで実装済みです。生成される SDK の依存は最小限（TypeScript は `fetch` のみ、
+C# は BCL のみ、Kotlin は `ktor-client-core` と `kotlinx-serialization-json` のみ）で、手書きのランタイムは生成物の `core/`
+（C# は `Core/`）にそのままコピーされます。
 
 ## インストール
 
@@ -105,6 +106,19 @@ C# プラグイン（`csharp()`）の主なオプション（すべて任意）:
 | `naming` | 型・プロパティ PascalCase、メソッド `{{name}}Async` | `{ type, method, property, file }` ごとに `{ case, name }` |
 | `typeMappings` | `{}` | `'string:uuid': 'string'` / `'integer': 'long'` のような `kind:format` または `kind` → C# 型式の上書き |
 | `hooks` | `{}` | `typeName` / `methodName`（基底名を返し、`naming.method` のテンプレートはその後に適用）/ `propertyName` / `fileName` / `typeOverride` |
+| `include` / `exclude` | なし | プラグイン単位の操作フィルタ |
+
+Kotlin プラグイン（`kotlin()`）の主なオプション（すべて任意）:
+
+| オプション | 既定 | 内容 |
+|---|---|---|
+| `output` | `'kotlin'` | 出力サブディレクトリ |
+| `packageName` | title を `.` で区切り、各部分を英数字の小文字にしたもの | ルート package（ランタイムは `<packageName>.core`、モデルは `.models`、サービスは `.services`） |
+| `clientName` | `'ApiClient'` | クライアントクラス名（オプションクラスは `<clientName>Options`） |
+| `package` | info から導出 | Gradle の `group`（既定 packageName）/ `name`（既定 title の kebab-case）/ `version` / `description` / 追加の `dependencies`（`implementation(...)`）。`false` で Gradle ファイルを生成しない |
+| `naming` | 型 PascalCase、メソッド・プロパティ camelCase | `{ type, method, property, file }` ごとに `{ case, name }` |
+| `typeMappings` | `{}` | `'integer': 'Long'` や `'string:date-time': { type: 'kotlinx.datetime.Instant', serializer: 'kotlinx.datetime.serializers.InstantIso8601Serializer' }` のような `kind:format` / `kind` → Kotlin 型（文字列なら serializer は `<type>.serializer()`） |
+| `hooks` | `{}` | `typeName` / `methodName` / `propertyName` / `fileName` / `typeOverride`（Kotlin 型、または `{ type, serializer }`） |
 | `include` / `exclude` | なし | プラグイン単位の操作フィルタ |
 
 ## 生成された SDK の使い方
@@ -269,6 +283,60 @@ var result = await client.Catalyst.GetCatalystV1StatusByIdWithResponseAsync("123
 - **判別あり union** は `[JsonPolymorphic]` 基底クラス + 派生クラスです（`shape is Circle c`）。未知の判別値は基底型そのもののインスタンスになり、他のプロパティは `AdditionalProperties` に入ります（判別値そのものは System.Text.Json の制約で保持されません）。バリアント型（`Circle`）を宣言したリクエストボディは基底型経由で直列化するので判別プロパティも送られますが、モデルのプロパティがバリアント型で宣言されている場合は判別プロパティが出力されません。バリアントが複数の union に属するなど基底クラスにできない場合と、**判別なし union** は、`Value` / バリアントごとのアクセサ（`pet.Cat`）/ `Unknown`（生 JSON）を持つラッパークラスになり、バリアントを宣言順に試して最初に読めたものを採用します。
 - 任意プロパティの `null` は送信しません（「未設定」と「null」の区別はスコープ外）。空の JSON 応答（204 など）は `null`（`default`）を返します。
 
+## 生成された Kotlin SDK の使い方
+
+JVM 11+ / Android 向けで、依存は `io.ktor:ktor-client-core` と `org.jetbrains.kotlinx:kotlinx-serialization-json`（どちらも `api`）のみです。
+HTTP engine は利用者が選びます（JVM なら CIO / OkHttp、Android なら OkHttp / Android）。serializer は型ごとに明示しており、
+リフレクションによる探索を使わないので R8 / ProGuard でもそのまま動きます。
+
+```
+kotlin/
+  build.gradle.kts, settings.gradle.kts   # package: false なら出力しない（Gradle wrapper は含めない）
+  src/main/kotlin/com/natsuneko/api/
+    ApiClient.kt                          # ApiClient / ApiClientOptions
+    ApiAuth.kt                            # スキーム名ごとの型付き認証設定
+    models/*.kt                           # schema ごとに 1 ファイル
+    services/<Group>Service.kt            # タグ（group）ごとのサービス（suspend 関数）
+    core/*.kt                             # ランタイム（runtimes/kotlin のコピー、package は <packageName>.core）
+```
+
+```kotlin
+import com.natsuneko.api.ApiAuth
+import com.natsuneko.api.ApiClient
+import com.natsuneko.api.core.RetryMiddleware
+import com.natsuneko.api.core.TokenValue
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import kotlin.time.Duration.Companion.seconds
+
+val client = ApiClient {
+    baseUrl = "https://api.natsuneko.com"           // 既定は servers[0]（ApiClient.DEFAULT_BASE_URL）
+    httpClient = HttpClient(CIO)                     // 省略すると classpath 上の engine で作る
+    auth = ApiAuth(bearerAuth = TokenValue("token")) // または TokenValue { fetchToken() }（送信のたびに呼ばれる）
+    timeout = 30.seconds
+    middleware.add(RetryMiddleware())
+}
+
+val status = client.catalyst.getCatalystV1StatusById("123")              // 成功ボディを返す
+val result = client.catalyst.getCatalystV1StatusByIdWithResponse("123")  // statusCode / headers / url / data
+client.close()  // SDK が作った HttpClient だけを閉じる
+```
+
+- 引数は path → 必須 body → 必須 query / header / cookie → 任意（`= null`）→ `requestOptions: RequestOptions? = null`。名前付き引数で任意パラメータを指定できます。no-content の操作は `Unit` を返します。
+- 非 2xx は常に `ApiException`（`statusCode` / `headers` / `rawBody` / `url`）です。宣言された型のボディは `error.bodyAs<NotFoundError>()` で取り出します（Kotlin の例外は型パラメータを持てないため、C# と違い非ジェネリック）。通信失敗・タイムアウトは `ApiTransportException`（`timedOut`）、2xx ボディのデコード失敗は `ApiDecodeException`（`rawBody`）、必須認証の未設定は送信前に `ApiAuthException`（`schemes`）。コルーチンのキャンセルは `CancellationException` のまま伝わります。
+- 認証は `ApiAuth` のプロパティ（スキーム名の camelCase）に設定します: bearer / apiKey は `TokenValue`、basic は `BasicValue`、OAuth2 / OpenID Connect は `OAuth2Value(accessToken | clientCredentials | refreshToken)`。OAuth2 のトークンは期限 30 秒前に先回り更新、同時取得は 1 回にまとめ（1 つの呼び出しをキャンセルしても他は巻き込まない）、管理トークンで 401 を受けたら 1 回だけ更新して再送します。未対応スキームは `customAuth` で扱います。
+- Middleware は `Middleware { request, next, context -> next(request) }`（`fun interface`）で作り、`middleware` に登録するか `client.use(...)` で追加します。登録順に外側から実行され、認証は最内側で適用されます。標準: `LoggingMiddleware`（資格情報をマスク）/ `UserAgentMiddleware` / `RetryMiddleware` / `Retry401Middleware`。
+- 渡した `HttpClient` は `config { followRedirects = false; expectSuccess = false }` の派生クライアントで使うので、自動リダイレクトや `expectSuccess` を設定済みでも構いません。リダイレクトはランタイムが手動で追い、別オリジンへ移るときは `Authorization` / `Cookie` / API キーを外します。`client.close()` は渡した `HttpClient` を閉じません。
+
+型の対応: `date-time` / `date` / `uuid` / `uri` / `byte` → `String`（`typeMappings` で差し替え可）、`int64` → `Long`（format 無しの integer は `Int`）、`binary` → `ApiFile`（`ByteArray` + ファイル名 + Content-Type）、未知の schema → `JsonElement`、任意プロパティは `T? = null`、必須 + nullable は `T?`（既定値なし）。
+
+- **enum** は未知の値を保持するクラスです（`Status.Active`、`status.value`、`status.isKnown`、`Status.knownValues`）。`enum class` では未知の値を再送できないためで、`when (status) { Status.Active -> … else -> … }` のように `else` が必要です（前方互換のため）。
+- **union** は `sealed interface` です。名前付き object のバリアントはそのデータクラス自身が実装し（`data class Cat(…) : Pet`、1 つのクラスが複数の union を実装できる）、それ以外は入れ子のラッパー（`Pet.StringValue(value)`、`Pet.CatList(value)`）になります。**判別あり** は判別値でバリアントを選び、**判別なし** はバリアントを宣言順に試して最初に読めたものを採用します。どれにも当たらなければ `Pet.Unknown(raw)` に生 JSON をそのまま（未知の判別値も含めて）保持します。判別プロパティはバリアントに残り、既定値（タグ）を持つので書かなくても送られます（`Circle(radius = 1.0)`）。
+- 任意プロパティの `null` は送信しません。宣言型が non-null の成功応答が空（204 など）のときは `null` ではなく `ApiDecodeException` になります（schema が nullable なら `null`）。
+- additionalProperties とプロパティを両方持つ object の追加プロパティは保持しません（プロパティの無い object は `Map<String, T>`）。
+
+生成した SDK は利用者の Gradle でビルドします。このリポジトリでは `runtimes/kotlin/gradlew -p <出力先> build` で試せます。
+
 ## カスタムプラグイン
 
 `definePlugin` で作ります。依存プラグイン（ここでは `typescript`）の公開 API `symbols` から、生成済みの型名・関数名を参照できます。
@@ -308,7 +376,7 @@ export default defineConfig({
 |---|---|---|
 | M1 | コア（loader / parser / IR / passes / 設定 / プラグイン API / CLI / CodeWriter）+ TypeScript プラグイン & ランタイム + モックサーバ + E2E 基盤 | 実装済み |
 | M2 | C#（.NET 10）プラグイン & BCL のみのランタイム | 実装済み |
-| M3 | Kotlin（JVM 11+ / Android） | 未着手 |
+| M3 | Kotlin（JVM 11+ / Android）プラグイン & ktor-client-core + kotlinx-serialization-json のみのランタイム | 実装済み |
 | M4 | Swift 6 | 未着手 |
 | M5 | Rust | 未着手 |
 | M6 | Go 1.22+ | 未着手 |
@@ -324,6 +392,8 @@ pnpm typecheck   # 全パッケージの tsc --noEmit
 pnpm test:e2e    # モックサーバに対して生成 SDK を実行する E2E（e2e/typescript）
 pnpm test:e2e:csharp   # 同じシナリオを生成 C# SDK で実行する E2E（e2e/csharp、要 .NET 10 SDK）
 dotnet test runtimes/csharp/tests/Archon.Runtime.Tests   # C# ランタイムの単体テスト
+pnpm test:e2e:kotlin   # 同じシナリオを生成 Kotlin SDK で実行する E2E（e2e/kotlin、要 JDK 17+）
+runtimes/kotlin/gradlew -p runtimes/kotlin test   # Kotlin ランタイムの単体テスト（Gradle wrapper 同梱）
 pnpm build       # 全パッケージのビルド
 pnpm -F @natsuneko-laboratory/archon-e2e-typescript smoke bun   # 生成 SDK を Bun / Deno（`smoke deno`）でモックサーバに対して実行
 ```
@@ -331,6 +401,7 @@ pnpm -F @natsuneko-laboratory/archon-e2e-typescript smoke bun   # 生成 SDK を
 CI（`.github/workflows/ci.yml`）は上記に加え、ランタイムの単体テストを Node.js 18 / 20 / 22 / 24 で、生成 SDK のスモークを Bun / Deno で実行します。
 
 C# 生成物のコンパイルテスト（`dotnet build -warnaserror`）は .NET 10 以降の SDK が無ければスキップされます（CI では `actions/setup-dotnet` で入れて実行します）。
+Kotlin 生成物のコンパイルテスト（`gradle build`、警告をエラー扱い）は JDK 17 以降が無ければスキップされます（CI では `actions/setup-java` で入れて実行します）。
 
 ### ライブスモーク（手動）
 

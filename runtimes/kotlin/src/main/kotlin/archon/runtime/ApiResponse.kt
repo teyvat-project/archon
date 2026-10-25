@@ -1,0 +1,10 @@
+package archon.runtime
+
+/** A response travelling back through the middleware chain; [body] has been read completely. */
+public class ApiResponse(
+    public val statusCode: Int,
+    public val headers: ApiHeaders,
+    /** The URL that produced this response (after redirects). */
+    public val url: String,
+    public val body: ByteArray,
+)

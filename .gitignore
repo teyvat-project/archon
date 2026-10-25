@@ -10,3 +10,7 @@ examples/*/sdk/
 **/bin/
 **/obj/
 e2e/csharp/generated/
+**/build/
+**/.gradle/
+.kotlin/
+e2e/kotlin/generated/

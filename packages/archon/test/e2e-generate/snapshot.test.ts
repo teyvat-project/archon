@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { Diagnostic } from '../../src/diagnostics.js';
 import { generate } from '../../src/generate.js';
-import { csharp, typescript } from '../../src/plugins.js';
+import { csharp, kotlin, typescript } from '../../src/plugins.js';
 
 const specs = fileURLToPath(new URL('../../../../fixtures/specs/', import.meta.url));
 
@@ -61,6 +61,35 @@ describe.each(['petstore', 'edge-cases'])('snapshot (csharp): %s', (spec) => {
       for (const file of files) {
         const content = await readFile(join(out, file), 'utf8');
         await expect(content).toMatchFileSnapshot(`__snapshots__/csharp/${spec}/${file}`);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe.each(['petstore', 'edge-cases'])('snapshot (kotlin): %s', (spec) => {
+  it('matches the Kotlin output snapshots', async () => {
+    const dir = await mkdtemp(join(tmpdir(), `archon-snapshot-kt-${spec}-`));
+    try {
+      const diagnostics: Diagnostic[] = [];
+      const out = join(dir, 'out');
+      const result = await generate(
+        { input: join(specs, `${spec}.yaml`), output: out, plugins: [kotlin({ output: '.' })] },
+        { cwd: dir, logger: (d) => diagnostics.push(d) },
+      );
+      expect(diagnostics.filter((d) => d.level !== 'info')).toEqual([]);
+
+      // core/ is the runtime copy, covered by plugins/kotlin/client.test.ts.
+      const files = (result.jobs[0]?.files ?? [])
+        .map((f) => relative(out, f).split('\\').join('/'))
+        .filter((f) => !/^src\/main\/kotlin\/.+\/core\//.test(f))
+        .sort();
+      expect(files).toContain('build.gradle.kts');
+      expect(files.some((f) => f.endsWith('/ApiClient.kt'))).toBe(true);
+      for (const file of files) {
+        const content = await readFile(join(out, file), 'utf8');
+        await expect(content).toMatchFileSnapshot(`__snapshots__/kotlin/${spec}/${file}`);
       }
     } finally {
       await rm(dir, { recursive: true, force: true });
