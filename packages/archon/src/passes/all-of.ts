@@ -1,6 +1,6 @@
 import type { Diagnostics } from '../diagnostics.js';
 import type { IRDocument, IRProperty, IRSchema } from '../ir/types.js';
-import { mapDocumentSchemas } from '../ir/walk.js';
+import { mapDocumentSchemas, mapSchema } from '../ir/walk.js';
 
 type ObjectSchema = Extract<IRSchema, { kind: 'object' }>;
 type Intersection = Extract<IRSchema, { kind: 'intersection' }>;
@@ -69,10 +69,14 @@ function merge(schema: Intersection, ir: IRDocument, visiting: ReadonlySet<strin
  * 残した上で `allof-not-flattened` を info に記録する。
  */
 export function flattenAllOf(ir: IRDocument, diagnostics: Diagnostics): void {
-  mapDocumentSchemas(ir, (schema) => {
+  const flatten = (schema: IRSchema): IRSchema => {
     if (schema.kind !== 'intersection') return schema;
     const merged = merge(schema, ir, new Set());
-    if (merged.status === 'object') return merged.schema;
+    if (merged.status === 'object') {
+      // 合成で取り込んだ ref 先のプロパティには未平坦化の intersection が残りうる（走査順に依存する）。
+      // 構造的に（ref はたどらず）もう一度平坦化するので、ループしない。
+      return mapSchema(merged.schema, flatten);
+    }
     if (merged.status === 'unresolved') {
       diagnostics.info(
         'allof-not-flattened',
@@ -81,5 +85,6 @@ export function flattenAllOf(ir: IRDocument, diagnostics: Diagnostics): void {
       );
     }
     return schema;
-  });
+  };
+  mapDocumentSchemas(ir, flatten);
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { IRDocument, IRSchema } from '../../src/ir/types.js';
-import { collectRefs, mapSchema, visitSchemas } from '../../src/ir/walk.js';
+import { collectRefs, mapDocumentSchemas, mapSchema, visitSchemas } from '../../src/ir/walk.js';
 
 const base = { nullable: false } as const;
 const str: IRSchema = { ...base, kind: 'string' };
@@ -140,5 +140,53 @@ describe('collectRefs', () => {
       additionalProperties: ref('B'),
     };
     expect(collectRefs(s)).toEqual(new Set(['A', 'B']));
+  });
+});
+
+describe('mapDocumentSchemas', () => {
+  test('replaces schemas in named schemas and every operation position, with root paths', () => {
+    const marker: IRSchema = { ...base, kind: 'boolean' };
+    const media = (): { mediaType: string; kind: 'json'; schema: IRSchema } => ({
+      mediaType: 'application/json',
+      kind: 'json',
+      schema: str,
+    });
+    const ir = doc({
+      schemas: new Map([['A', str]]),
+      operations: [
+        {
+          id: 'GET /a',
+          name: 'getA',
+          method: 'get',
+          path: '/a',
+          tags: [],
+          deprecated: false,
+          parameters: [
+            { name: 'q', in: 'query', required: false, deprecated: false, schema: str, style: 'form', explode: true, allowReserved: false },
+          ],
+          requestBody: { required: true, contents: [media()] },
+          responses: [{ status: 200, headers: new Map([['X-H', str]]), contents: [media()] }],
+          security: [],
+        },
+      ],
+    });
+    const paths: string[] = [];
+    mapDocumentSchemas(ir, (s, p) => {
+      paths.push(p.join('/'));
+      return s.kind === 'string' ? marker : s;
+    });
+    expect(paths).toEqual([
+      'schemas/A',
+      'operations/GET /a/parameters/q',
+      'operations/GET /a/requestBody/application/json',
+      'operations/GET /a/responses/200/headers/X-H',
+      'operations/GET /a/responses/200/application/json',
+    ]);
+    const op = ir.operations[0];
+    expect(ir.schemas.get('A')).toBe(marker);
+    expect(op?.parameters[0]?.schema).toBe(marker);
+    expect(op?.requestBody?.contents[0]?.schema).toBe(marker);
+    expect(op?.responses[0]?.headers.get('X-H')).toBe(marker);
+    expect(op?.responses[0]?.contents[0]?.schema).toBe(marker);
   });
 });

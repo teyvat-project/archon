@@ -205,4 +205,18 @@ describe('flattenAllOf', () => {
     expect(props(o?.parameters[0]?.schema)).toHaveLength(2);
     expect(props(o?.responses[0]?.headers.get('X-H'))).toHaveLength(2);
   });
+
+  it('flattens nested allOf copied from a ref target declared after the referrer', () => {
+    const inner = allOf([obj({ a: str }), obj({ b: str })]);
+    const ir = doc({
+      Child: allOf([ref('Base'), obj({ z: str })]),
+      Base: obj({ list: { kind: 'array', nullable: false, items: inner } as IRSchema }),
+    });
+    flattenAllOf(ir, new Diagnostics());
+    for (const name of ['Child', 'Base']) {
+      const schema = ir.schemas.get(name);
+      const list = schema?.kind === 'object' ? schema.properties.find((p) => p.name === 'list')?.schema : undefined;
+      expect(list?.kind === 'array' ? list.items.kind : undefined).toBe('object');
+    }
+  });
 });
