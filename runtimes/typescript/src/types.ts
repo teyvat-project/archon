@@ -80,3 +80,10 @@ export interface CallContext {
 export type Next = (req: ApiRequest) => Promise<ApiResponse>;
 
 export type Middleware = (req: ApiRequest, next: Next, ctx: CallContext) => Promise<ApiResponse>;
+
+export interface TokenSet {
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  scope?: string;
+}
