@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
+    "smoke": "node scripts/runtime-smoke.mjs",
     "typecheck": "node scripts/generate.mjs && tsc --noEmit -p ."
   },
   "devDependencies": {

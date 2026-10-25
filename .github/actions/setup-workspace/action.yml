@@ -1,0 +1,19 @@
+name: Set up workspace
+description: Installs pnpm (version from package.json `packageManager`) and Node.js with the pnpm store cache, then runs `pnpm install --frozen-lockfile`.
+
+inputs:
+  node-version:
+    description: Node.js version used for installing the workspace.
+    required: false
+    default: '24'
+
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v6
+    - uses: actions/setup-node@v7
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+    - run: pnpm install --frozen-lockfile
+      shell: bash
