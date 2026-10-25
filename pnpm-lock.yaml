@@ -48,6 +48,12 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@24.19.2)(jiti@2.7.0)(lightningcss@1.33.0)(yaml@2.9.1)
 
+  examples/natsuneko:
+    devDependencies:
+      archon:
+        specifier: workspace:*
+        version: link:../../packages/archon
+
   packages/archon:
     dependencies:
       '@apidevtools/json-schema-ref-parser':
