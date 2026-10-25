@@ -131,9 +131,9 @@ describe('cli init', () => {
 
 describe('cli misc', () => {
   it('prints help and exits 0', async () => {
-    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     expect(await runCli(argv('--help'))).toBe(0);
-    expect(log.mock.calls.flat().join('\n')).toContain('generate');
+    expect(info.mock.calls.flat().join('\n')).toContain('generate');
   });
 
   it('exits 1 on unknown command', async () => {

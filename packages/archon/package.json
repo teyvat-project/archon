@@ -26,11 +26,11 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.19.0"
   },
   "dependencies": {
-    "@apidevtools/json-schema-ref-parser": "^11.9.3",
-    "cac": "^6.7.14",
+    "@apidevtools/json-schema-ref-parser": "^16.0.5",
+    "cac": "^7.1.0",
     "jiti": "^2.7.0",
     "yaml": "^2.9.1"
   },
