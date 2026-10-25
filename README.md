@@ -3,8 +3,8 @@
 OpenAPI 3.0 / 3.1 の仕様から、**外部依存を最小化した** SDK を生成するジェネレータ（Meta SDK）です。
 設計の詳細は [`docs/superpowers/specs/2026-10-25-archon-design.md`](docs/superpowers/specs/2026-10-25-archon-design.md) を参照してください。
 
-現在は **M1（コア + TypeScript プラグイン）** まで実装済みです。生成される TypeScript SDK は実行時依存ゼロ（`fetch` のみ）で、
-ランタイムは生成物の `core/` にそのままコピーされます。
+現在は **M2（コア + TypeScript / C# プラグイン）** まで実装済みです。生成される SDK は実行時依存ゼロ（TypeScript は `fetch` のみ、
+C# は BCL のみ）で、手書きのランタイムは生成物の `core/`（C# は `Core/`）にそのままコピーされます。
 
 ## インストール
 
@@ -93,6 +93,19 @@ TypeScript プラグインの主なオプション（すべて任意）:
 | `typeMappings` | `{}` | `'string:uuid': 'Uuid'` のような `kind:format` → TS 型式の上書き |
 | `hooks` | `{}` | `typeName` / `methodName` / `typeOverride` |
 | `include` / `exclude` | なし | プラグイン単位の操作フィルタ（`parser.filters` と同じ構文） |
+
+C# プラグイン（`csharp()`）の主なオプション（すべて任意）:
+
+| オプション | 既定 | 内容 |
+|---|---|---|
+| `output` | `'csharp'` | 出力サブディレクトリ |
+| `namespace` | title の PascalCase | ルート namespace（ランタイムは `<namespace>.Core`） |
+| `clientName` | `'ApiClient'` | クライアントクラス名（オプションクラスは `<clientName>Options`） |
+| `package` | info から導出 | `.csproj` の `name`（= PackageId / AssemblyName）/ `version` / `description` / `authors` / `license`。`false` で生成しない |
+| `naming` | 型・プロパティ PascalCase、メソッド `{{name}}Async` | `{ type, method, property, file }` ごとに `{ case, name }` |
+| `typeMappings` | `{}` | `'string:uuid': 'string'` / `'integer': 'long'` のような `kind:format` または `kind` → C# 型式の上書き |
+| `hooks` | `{}` | `typeName` / `methodName`（基底名を返し、`naming.method` のテンプレートはその後に適用）/ `propertyName` / `fileName` / `typeOverride` |
+| `include` / `exclude` | なし | プラグイン単位の操作フィルタ |
 
 ## 生成された SDK の使い方
 
@@ -213,6 +226,49 @@ Browser / Node.js 18+ / Bun / Deno / React Native / Cloudflare Workers（ESM の
 - TypeScript の判別可能 union で絞り込むには、spec 側で判別プロパティがリテラル（`const` / 単一値の `enum`）になっている必要があります。
 - middleware / オプション名は spec §6.2 の表記と異なります（`loggingMiddleware`、`retryMiddleware` の `baseDelayMs` など）。
 
+## 生成された C# SDK の使い方
+
+.NET 10（`net10.0`）向けで、依存は BCL のみです。JSON は System.Text.Json の source generation を使うので AOT / トリミングに対応します。
+
+```
+csharp/
+  Natsuneko.Api.csproj        # package: false なら出力しない
+  ApiClient.cs                # ApiClient / ApiClientOptions
+  ApiAuth.cs                  # スキーム名ごとの型付き認証設定
+  ApiJsonContext.cs           # JsonSerializerContext（[JsonSerializable] の一覧）
+  Models/*.cs                 # schema ごとに 1 ファイル（inline の object / enum / union は {Parent}{Prop} で巻き上げ）
+  Services/<Group>Service.cs  # タグ（group）ごとのサービス
+  Core/*.cs                   # ランタイム（runtimes/csharp/src のコピー）
+```
+
+```csharp
+using Natsuneko.Api;
+using Natsuneko.Api.Core;
+
+var client = new ApiClient(new ApiClientOptions
+{
+    BaseUrl = "https://api.natsuneko.com",          // 既定は servers[0]（ApiClient.DefaultBaseUrl）
+    Auth = new ApiAuth { BearerAuth = "token" },    // 文字列、または new TokenValue(ct => ...)
+    Timeout = TimeSpan.FromSeconds(30),
+    Middleware = { new RetryMiddleware(), new UserAgentMiddleware("my-app/1.0") },
+});
+
+var status = await client.Catalyst.GetCatalystV1StatusByIdAsync("123");            // 成功ボディを返す
+var result = await client.Catalyst.GetCatalystV1StatusByIdWithResponseAsync("123"); // StatusCode / Headers / Url / Data
+```
+
+- 引数は path → 必須 body → 必須 query / header / cookie → 任意（`= null`）→ `RequestOptions? requestOptions` → `CancellationToken`。名前付き引数で任意パラメータを指定できます。
+- 非 2xx は常に例外です: `ApiException<T>`（そのステータスで宣言された型の `Body`。`404` → `4XX` → `default` の順に探す）、宣言が無い / ボディが壊れている場合は `ApiException`（`StatusCode` / `Headers` / `RawBody` / `Url`）。通信失敗・タイムアウトは `ApiTransportException`（`TimedOut`）、2xx ボディのデコード失敗は `ApiDecodeException`（`RawBody`）、必須認証の未設定は送信前に `ApiAuthException`（`Schemes`）。呼び出し側のキャンセルは `OperationCanceledException` です。
+- 認証は `ApiAuth` のプロパティ（スキーム名の PascalCase）に設定します: bearer / apiKey は `TokenValue`、basic は `BasicValue`、OAuth2 / OpenID Connect は `OAuth2Value { AccessToken | ClientCredentials | RefreshToken }`。OAuth2 のトークンは期限 30 秒前に先回り更新、同時取得は 1 回にまとめ、管理トークンで 401 を受けたら 1 回だけ更新して再送します。未対応スキーム（digest、mutualTLS）は `ClientOptions.CustomAuth` で扱います。
+- Middleware は `IApiMiddleware`（`InvokeAsync(request, next, context, cancellationToken)`）か `ApiMiddleware.Create((req, next, ctx, ct) => ...)` で作り、`Middleware` に登録するか `client.Use(...)` で追加します。登録順に外側から実行され、認証は最内側で適用されます。標準: `LoggingMiddleware`（資格情報をマスク）/ `UserAgentMiddleware` / `RetryMiddleware` / `Retry401Middleware`。
+- 独自の `HttpClient`（`ClientOptions.HttpClient`）は、ハンドラを `AllowAutoRedirect = false` / `UseCookies = false` にしてください。リダイレクトはランタイムが手動で追い、別オリジンへ移るときは `Authorization` / `Cookie` / API キーを外します。
+
+型の対応: `date-time` → `DateTimeOffset`、`date` → `DateOnly`、`uuid` → `Guid`、`int64` → `long`（format 無しの integer は `int`）、`binary` → `ApiFile`（`byte[]` または `Stream` + ファイル名）、未知の schema → `JsonElement`、必須プロパティは `required`、任意 / nullable は `T?`。
+
+- **enum** は未知の値を保持する構造体です（`Status.Active`、`status.Value`、`status.IsKnown`）。`switch` は `status.Value` か `==` で比較します。
+- **判別あり union** は `[JsonPolymorphic]` 基底クラス + 派生クラスです（`shape is Circle c`）。未知の判別値は基底型そのもののインスタンスになり、他のプロパティは `AdditionalProperties` に入ります（判別値そのものは System.Text.Json の制約で保持されません）。バリアント型（`Circle`）を宣言したリクエストボディは基底型経由で直列化するので判別プロパティも送られますが、モデルのプロパティがバリアント型で宣言されている場合は判別プロパティが出力されません。バリアントが複数の union に属するなど基底クラスにできない場合と、**判別なし union** は、`Value` / バリアントごとのアクセサ（`pet.Cat`）/ `Unknown`（生 JSON）を持つラッパークラスになり、バリアントを宣言順に試して最初に読めたものを採用します。
+- 任意プロパティの `null` は送信しません（「未設定」と「null」の区別はスコープ外）。空の JSON 応答（204 など）は `null`（`default`）を返します。
+
 ## カスタムプラグイン
 
 `definePlugin` で作ります。依存プラグイン（ここでは `typescript`）の公開 API `symbols` から、生成済みの型名・関数名を参照できます。
@@ -251,7 +307,7 @@ export default defineConfig({
 | | 内容 | 状態 |
 |---|---|---|
 | M1 | コア（loader / parser / IR / passes / 設定 / プラグイン API / CLI / CodeWriter）+ TypeScript プラグイン & ランタイム + モックサーバ + E2E 基盤 | 実装済み |
-| M2 | C#（.NET 10） | 未着手 |
+| M2 | C#（.NET 10）プラグイン & BCL のみのランタイム | 実装済み |
 | M3 | Kotlin（JVM 11+ / Android） | 未着手 |
 | M4 | Swift 6 | 未着手 |
 | M5 | Rust | 未着手 |
@@ -266,11 +322,15 @@ M1 の TypeScript プラグインでは `bigint`（int64）オプション、`na
 pnpm test        # 単体・スナップショット・生成物のコンパイルテスト（vitest）
 pnpm typecheck   # 全パッケージの tsc --noEmit
 pnpm test:e2e    # モックサーバに対して生成 SDK を実行する E2E（e2e/typescript）
+pnpm test:e2e:csharp   # 同じシナリオを生成 C# SDK で実行する E2E（e2e/csharp、要 .NET 10 SDK）
+dotnet test runtimes/csharp/tests/Archon.Runtime.Tests   # C# ランタイムの単体テスト
 pnpm build       # 全パッケージのビルド
 pnpm -F @natsuneko-laboratory/archon-e2e-typescript smoke bun   # 生成 SDK を Bun / Deno（`smoke deno`）でモックサーバに対して実行
 ```
 
 CI（`.github/workflows/ci.yml`）は上記に加え、ランタイムの単体テストを Node.js 18 / 20 / 22 / 24 で、生成 SDK のスモークを Bun / Deno で実行します。
+
+C# 生成物のコンパイルテスト（`dotnet build -warnaserror`）は .NET 10 以降の SDK が無ければスキップされます（CI では `actions/setup-dotnet` で入れて実行します）。
 
 ### ライブスモーク（手動）
 

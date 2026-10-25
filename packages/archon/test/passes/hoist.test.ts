@@ -391,6 +391,55 @@ describe('hoistInlineSchemas', () => {
     expect(prop(ir.schemas.get('CommentMeta'), 'parent')).toEqual(ref('Comment'));
   });
 
+  it('hoists inline unions with Parent+Prop names when unions=true', () => {
+    const ir = doc({
+      Holder: obj({ pet: union([ref('Cat'), obj({ x: str })], { nullable: true, description: 'd' }) }),
+      Cat: obj({ meows: str }),
+    });
+    hoistInlineSchemas(ir, { ...both, unions: true });
+    expect(prop(ir.schemas.get('Holder'), 'pet')).toEqual({ kind: 'ref', name: 'HolderPet', nullable: true, description: 'd' });
+    const pet = ir.schemas.get('HolderPet');
+    expect(pet?.kind).toBe('union');
+    expect(pet?.nullable).toBe(false);
+    expect(pet?.kind === 'union' && pet.variants).toEqual([ref('Cat'), ref('HolderPetVariant2')]);
+    expect([...ir.schemas.keys()]).toEqual(['Holder', 'Cat', 'HolderPet', 'HolderPetVariant2']);
+  });
+
+  it('names discriminated variants under the hoisted union name', () => {
+    const ir = doc({
+      Holder: obj({
+        shape: union([obj({ kind: tag('circle'), r: str }), ref('Square')], {
+          discriminator: { property: 'kind', mapping: new Map([['circle', ''], ['square', 'Square']]) },
+        }),
+      }),
+      Square: obj({ kind: tag('square') }),
+    });
+    hoistInlineSchemas(ir, { ...both, unions: true });
+    const shape = ir.schemas.get('HolderShape');
+    expect(shape?.kind === 'union' && shape.variants).toEqual([ref('HolderShapeCircle'), ref('Square')]);
+    expect(shape?.kind === 'union' && shape.discriminator?.mapping).toEqual(
+      new Map([['circle', 'HolderShapeCircle'], ['square', 'Square']]),
+    );
+  });
+
+  it('hoists response unions as {Op}Response{Status}', () => {
+    const ir = doc({}, [
+      op('trend', {
+        responses: [{ status: 200, headers: new Map(), contents: [json(union([arr(str), arr(ref('X'))]))] }],
+      }),
+    ]);
+    hoistInlineSchemas(ir, { objects: true, enums: true, unions: true });
+    expect(ir.operations[0]?.responses[0]?.contents[0]?.schema).toEqual(ref('TrendResponse200'));
+    expect(ir.schemas.get('TrendResponse200')?.kind).toBe('union');
+  });
+
+  it('leaves unions inline when unions is not set', () => {
+    const ir = doc({ Holder: obj({ pet: union([str, obj({ x: str })]) }) });
+    hoistInlineSchemas(ir, both);
+    expect(prop(ir.schemas.get('Holder'), 'pet')?.kind).toBe('union');
+    expect([...ir.schemas.keys()]).toEqual(['Holder', 'HolderPetVariant2']);
+  });
+
   it('does nothing when both objects and enums are false', () => {
     const ir = doc({ User: obj({ role: tag('a'), profile: obj({ a: str }) }) });
     const before = structuredClone(ir.schemas);

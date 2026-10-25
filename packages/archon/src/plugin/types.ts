@@ -5,7 +5,7 @@ import type { IRDocument } from '../ir/types.js';
 /** `path` is relative to `output.path`. */
 export type EmittedFile = { path: string; content: string | Uint8Array };
 
-export type IRRequirements = { hoistInlineObjects?: boolean; hoistInlineEnums?: boolean };
+export type IRRequirements = { hoistInlineObjects?: boolean; hoistInlineEnums?: boolean; hoistInlineUnions?: boolean };
 
 export interface PluginContext<O> {
   ir: IRDocument;

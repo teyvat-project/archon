@@ -74,6 +74,29 @@ describe('parameters', () => {
   });
 });
 
+describe('parameter descriptions', () => {
+  test('carries parameter description, including from component refs', () => {
+    const { ir } = parse({
+      components: { parameters: { Limit: { name: 'limit', in: 'query', description: 'Max items.', schema: { type: 'integer' } } } },
+      paths: {
+        '/p/{id}': {
+          get: {
+            parameters: [
+              { name: 'id', in: 'path', description: 'The id.', schema: { type: 'string' } },
+              { name: 'q', in: 'query', schema: { type: 'string' } },
+              { $ref: '#/components/parameters/Limit' },
+            ],
+            responses: ok,
+          },
+        },
+      },
+    });
+    const params = ir.operations[0]?.parameters ?? [];
+    expect(params.map((p) => p.description)).toEqual(['The id.', undefined, 'Max items.']);
+    expect('description' in (params[1] ?? {})).toBe(false);
+  });
+});
+
 describe('request bodies', () => {
   test('sorts request body contents by priority and logs ignored alternatives', () => {
     const { ir, diagnostics } = parse({

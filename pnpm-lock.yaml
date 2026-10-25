@@ -18,6 +18,18 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@24.19.2)(jiti@2.7.0)(lightningcss@1.33.0)(yaml@2.9.1)
 
+  e2e/csharp:
+    devDependencies:
+      '@natsuneko-laboratory/archon':
+        specifier: workspace:*
+        version: link:../../packages/archon
+      '@natsuneko-laboratory/archon-e2e-mock-server':
+        specifier: workspace:*
+        version: link:../mock-server
+      jiti:
+        specifier: ^2.7.0
+        version: 2.7.0
+
   e2e/mock-server:
     devDependencies:
       '@types/node':
