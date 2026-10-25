@@ -10,7 +10,8 @@
     "build": "pnpm -r build",
     "test:e2e:csharp": "pnpm -F @natsuneko-laboratory/archon-e2e-csharp test",
     "test:e2e:kotlin": "pnpm -F @natsuneko-laboratory/archon-e2e-kotlin test",
-    "test:e2e:swift": "pnpm -F @natsuneko-laboratory/archon-e2e-swift test"
+    "test:e2e:swift": "pnpm -F @natsuneko-laboratory/archon-e2e-swift test",
+    "test:e2e:rust": "pnpm -F @natsuneko-laboratory/archon-e2e-rust test"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
