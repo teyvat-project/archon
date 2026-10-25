@@ -19,3 +19,4 @@ e2e/kotlin/generated/
 e2e/swift/generated/
 **/target/
 e2e/rust/generated/
+e2e/go/generated/

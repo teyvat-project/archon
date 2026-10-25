@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { Diagnostic } from '../../src/diagnostics.js';
 import { generate } from '../../src/generate.js';
-import { csharp, kotlin, rust, swift, typescript } from '../../src/plugins.js';
+import { csharp, go, kotlin, rust, swift, typescript } from '../../src/plugins.js';
 
 const specs = fileURLToPath(new URL('../../../../fixtures/specs/', import.meta.url));
 
@@ -147,6 +147,35 @@ describe.each(['petstore', 'edge-cases'])('snapshot (rust): %s', (spec) => {
       for (const file of files) {
         const content = await readFile(join(out, file), 'utf8');
         await expect(content).toMatchFileSnapshot(`__snapshots__/rust/${spec}/${file}`);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe.each(['petstore', 'edge-cases'])('snapshot (go): %s', (spec) => {
+  it('matches the Go output snapshots', async () => {
+    const dir = await mkdtemp(join(tmpdir(), `archon-snapshot-go-${spec}-`));
+    try {
+      const diagnostics: Diagnostic[] = [];
+      const out = join(dir, 'out');
+      const result = await generate(
+        { input: join(specs, `${spec}.yaml`), output: out, plugins: [go({ output: '.' })] },
+        { cwd: dir, logger: (d) => diagnostics.push(d) },
+      );
+      expect(diagnostics.filter((d) => d.level !== 'info')).toEqual([]);
+
+      // core/ is the runtime copy, covered by plugins/go/client.test.ts.
+      const files = (result.jobs[0]?.files ?? [])
+        .map((f) => relative(out, f).split('\\').join('/'))
+        .filter((f) => !f.startsWith('core/'))
+        .sort();
+      expect(files).toContain('go.mod');
+      expect(files).toContain('client.go');
+      for (const file of files) {
+        const content = await readFile(join(out, file), 'utf8');
+        await expect(content).toMatchFileSnapshot(`__snapshots__/go/${spec}/${file}`);
       }
     } finally {
       await rm(dir, { recursive: true, force: true });

@@ -55,6 +55,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      # For the `go vet` / `gofmt -l` compile tests of the Go output (skipped without Go).
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache: false
       - run: pnpm test
 
   build:
@@ -73,7 +78,7 @@ jobs:
             const paths = files.map((f) => f.path);
             const required = ["dist/cli.js", "dist/index.js", "dist/index.d.ts", "dist/plugins.js", "dist/plugins.d.ts"];
             const missing = required.filter((p) => !paths.includes(p));
-            for (const lang of ["typescript", "csharp", "kotlin", "swift", "rust"]) {
+            for (const lang of ["typescript", "csharp", "kotlin", "swift", "rust", "go"]) {
               if (!paths.some((p) => p.startsWith(`runtimes/${lang}/`))) missing.push(`runtimes/${lang}/**`);
             }
             const leaked = paths.filter(
@@ -81,7 +86,8 @@ jobs:
                 /^runtimes\/csharp\/.*(\.csproj$|\/(bin|obj)\/)/.test(p) ||
                 /^runtimes\/kotlin\/(src\/test\/|.*\/(build|\.gradle)\/)/.test(p) ||
                 /^runtimes\/swift\/.*(Package\.swift$|\/\.build\/)/.test(p) ||
-                /^runtimes\/rust\/(tests\/|target\/|Cargo\.)/.test(p),
+                /^runtimes\/rust\/(tests\/|target\/|Cargo\.)/.test(p) ||
+                /^runtimes\/go\/.*(_test\.go$|\/testdata\/)/.test(p),
             );
             if (leaked.length > 0) missing.push(`no build files (${leaked.join(", ")})`);
             console.log(paths.join("\n"));
@@ -226,6 +232,41 @@ jobs:
       - uses: ./.github/actions/setup-workspace
       - run: pnpm test:e2e:swift
 
+  # ---- Go SDK ----
+
+  # The generated SDK claims Go 1.22+: the runtime's own suite runs on 1.22 and on the latest release.
+  runtime-go:
+    name: runtime-go (${{ matrix.go }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.22', 'stable']
+    defaults:
+      run:
+        working-directory: runtimes/go
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+      - run: go version && go vet ./... && test -z "$(gofmt -l .)" && go test -race ./...
+
+  # Generates the edge-cases SDK and runs the Go test suite in e2e/go against the shared mock server.
+  e2e-go:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-workspace
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.22'
+          cache: false
+      - run: pnpm test:e2e:go -race
+
   # ---- Rust SDK ----
 
   # The runtime's tests and lints on stable and on the rust-version the generated Cargo.toml declares.
@@ -284,6 +325,8 @@ jobs:
       - e2e-swift-macos
       - runtime-rust
       - e2e-rust
+      - runtime-go
+      - e2e-go
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
