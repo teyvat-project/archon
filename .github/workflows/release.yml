@@ -1,0 +1,75 @@
+name: Release
+
+# Publishes @natsuneko-laboratory/archon to npm when a `v*` tag is pushed. Authenticates with npm Trusted Publishing
+# (OIDC), so there is no NPM_TOKEN secret; npm attaches provenance automatically. The trusted publisher on npmjs.com
+# must name this repository, this workflow file (`release.yml`) and the `npm` environment.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@natsuneko-laboratory/archon
+    permissions:
+      contents: read
+      id-token: write # for the OIDC token exchanged with npm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # for the ancestry check against main
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Check the tag
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(node -p "require('./packages/archon/package.json').version")"
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::Tag $TAG does not match packages/archon/package.json version $version."
+            exit 1
+          fi
+          # `archon --version` prints this constant, so it must be bumped together with package.json.
+          if ! grep -q "export const version = '$version';" packages/archon/src/index.ts; then
+            echo "::error::packages/archon/src/index.ts does not export version '$version'."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $TAG points to a commit that is not on main."
+            exit 1
+          fi
+          # Prereleases (1.2.0-beta.1) go to the `next` dist-tag so they never become `latest`.
+          case "$version" in
+            *-*) echo "dist-tag=next" >> "$GITHUB_OUTPUT" ;;
+            *) echo "dist-tag=latest" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      # Trusted publishing needs npm 11.5.1 or later.
+      - name: Ensure npm supports trusted publishing
+        run: |
+          current="$(npm --version)"
+          if ! node -e "const [a, b, c] = process.argv[1].split('.').map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)" "$current"; then
+            npm install -g npm@^11.5.1
+          fi
+          npm --version
+
+      # npm (not pnpm) publishes so that the OIDC exchange is handled by the npm CLI. `prepack` still builds with pnpm.
+      - name: Publish
+        working-directory: packages/archon
+        env:
+          DIST_TAG: ${{ steps.version.outputs.dist-tag }}
+        run: npm publish --access public --tag "$DIST_TAG"

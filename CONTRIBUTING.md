@@ -66,6 +66,29 @@ CI (`.github/workflows/ci.yml`) runs all of the above. It installs the toolchain
 22 and 24, smoke tests the generated TypeScript SDK on Bun and Deno, and runs the Swift runtime tests and E2E on both
 Linux (the `swift:6.2` container) and macOS.
 
+## Releasing
+
+`.github/workflows/release.yml` publishes `@natsuneko-laboratory/archon` to npm when a `v*` tag is pushed. It
+authenticates with [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC), so the repository
+stores no npm token, and npm attaches provenance to every release.
+
+1. Bump the version in both `packages/archon/package.json` and `packages/archon/src/index.ts` (`archon --version`
+   prints the latter), and merge the change into `main`.
+2. Tag the merge commit on `main` and push the tag:
+
+   ```sh
+   git tag v0.2.0 origin/main
+   git push origin v0.2.0
+   ```
+
+The workflow fails before publishing if the tag does not match both versions, if the tagged commit is not on `main`,
+or if typecheck or tests fail. Prerelease versions (such as `0.2.0-beta.1`) are published with the `next` dist-tag
+instead of `latest`.
+
+The trusted publisher is configured in the package settings on npmjs.com with organization `teyvat-project`,
+repository `archon`, workflow `release.yml` and environment `npm`. Renaming the workflow file or the environment
+breaks publishing until the setting is updated.
+
 ## Live smoke test (manual)
 
 This test calls the real `api.natsuneko.com` API through a generated SDK (needs network access). It generates an SDK
