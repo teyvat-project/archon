@@ -4,7 +4,7 @@
 name = "swagger-petstore"
 version = "1.0.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "A minimal petstore used for snapshot and compile tests."
 
 [dependencies]

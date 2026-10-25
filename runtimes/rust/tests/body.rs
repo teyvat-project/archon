@@ -77,15 +77,14 @@ async fn encodes_multipart_with_quoted_names_and_filenames() {
     send(&server, &MULTIPART, RequestValues::new().multipart(multipart)).await;
     let request = server.last();
     assert_eq!(request.header("content-type"), Some(content_type.as_str()));
-    let boundary = content_type.split("boundary=").nth(1).unwrap();
+    let b = content_type.split("boundary=").nth(1).unwrap();
     let expected = format!(
         "--{b}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nhello\r\n\
          --{b}\r\nContent-Disposition: form-data; name=\"tags\"\r\n\r\nx\r\n\
          --{b}\r\nContent-Disposition: form-data; name=\"tags\"\r\n\r\ny\r\n\
          --{b}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a%22b.txt\"\r\nContent-Type: text/plain\r\n\r\nabc\r\n\
          --{b}\r\nContent-Disposition: form-data; name=\"more\"; filename=\"blob\"\r\nContent-Type: application/octet-stream\r\n\r\nz\r\n\
-         --{b}--\r\n",
-        b = boundary
+         --{b}--\r\n"
     );
     assert_eq!(request.text(), expected);
 }

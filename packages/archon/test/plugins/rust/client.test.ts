@@ -83,7 +83,7 @@ describe('rust plugin: client', () => {
       package: { license: 'MIT', authors: ['Natsuneko'], repository: 'https://github.test/x', dependencies: ['chrono = { version = "0.4", features = ["serde"] }'] },
     });
     const cargo = file(files, 'Cargo.toml');
-    expect(cargo).toContain('# Generated header\n\n[package]\nname = "pet-store"\nversion = "2026.10.1"\nedition = "2021"\nrust-version = "1.85"\n');
+    expect(cargo).toContain('# Generated header\n\n[package]\nname = "pet-store"\nversion = "2026.10.1"\nedition = "2021"\nrust-version = "1.88"\n');
     expect(cargo).toContain('description = "Pets \\"and\\" more."\nlicense = "MIT"\nauthors = ["Natsuneko"]\nrepository = "https://github.test/x"\n');
     expect(cargo).toContain('reqwest = { version = "0.13.5", default-features = false }\n');
     expect(cargo).toContain('serde_json = { version = "1.0.154", features = ["preserve_order"] }\n');

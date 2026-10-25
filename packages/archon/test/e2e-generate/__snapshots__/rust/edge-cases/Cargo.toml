@@ -4,7 +4,7 @@
 name = "archon-edge-cases"
 version = "1.0.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "Covers every feature the generators support. Implemented by the mock server in e2e/mock-server and exercised by the end-to-end suites."
 
 [dependencies]

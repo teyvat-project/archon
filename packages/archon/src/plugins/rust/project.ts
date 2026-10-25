@@ -4,7 +4,7 @@ import type { RustPluginOptions } from './index.js';
 import { packageName } from './names.js';
 
 // The only place these versions are written for generated SDKs; a test keeps runtimes/rust and e2e/rust in step.
-export const RUST_VERSION = '1.85';
+export const RUST_VERSION = '1.88';
 export const REQWEST_VERSION = '0.13.5';
 export const SERDE_VERSION = '1.0.229';
 export const SERDE_JSON_VERSION = '1.0.154';
