@@ -89,7 +89,7 @@ describe('kotlin plugin: client, auth and Gradle files', () => {
     expect(build).toContain('version = "2026.10.23"');
     expect(build).toContain('description = "The \\"API\\"."');
     expect(build).toContain('api("io.ktor:ktor-client-core:3.6.0")');
-    expect(build).toContain('api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")');
+    expect(build).toContain('api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")');
     expect(build).toContain('implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.7.1")');
     expect(build).toContain('explicitApi()');
     expect(build).toContain('jvmTarget.set(JvmTarget.JVM_11)');

@@ -14,7 +14,7 @@ description = "A minimal petstore used for snapshot and compile tests."
 
 dependencies {
     api("io.ktor:ktor-client-core:3.6.0")
-    api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+    api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
 }
 
 java {

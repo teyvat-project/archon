@@ -26,6 +26,10 @@ updates:
     directories: ['/runtimes/kotlin', '/e2e/kotlin']
     schedule:
       interval: weekly
+    ignore:
+      # JUnit 6 needs JVM 17; the runtime's tests compile against its JVM 11 target.
+      - dependency-name: 'org.junit:junit-bom'
+        update-types: ['version-update:semver-major']
     groups:
       gradle:
         patterns: ['*']
