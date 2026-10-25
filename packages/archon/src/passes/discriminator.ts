@@ -14,7 +14,7 @@ function resolveObject(schema: IRSchema, ir: IRDocument, seen: Set<string> = new
 }
 
 /** `const`（string）または単一値の string `enum` ならその値を返す。 */
-function tagValue(schema: IRSchema): string | undefined {
+export function tagValue(schema: IRSchema): string | undefined {
   if (schema.nullable) return undefined;
   if (schema.kind === 'const') return typeof schema.value === 'string' ? schema.value : undefined;
   if (schema.kind === 'enum' && schema.base === 'string' && schema.values.length === 1) {
