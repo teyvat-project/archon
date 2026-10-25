@@ -150,7 +150,7 @@ internal sealed class AuthMiddleware : IApiMiddleware
     private readonly ApiClientCore _core;
     private readonly object _lock = new();
     private (IAuthConfig? Auth, string BaseUrl, HttpClientIdentity Http) _managersFor;
-    private Dictionary<string, OAuth2TokenManager> _managers = [];
+    private Dictionary<string, (OAuth2Value Value, OAuth2TokenManager Manager)> _managers = [];
 
     public AuthMiddleware(ApiClientCore core)
     {
@@ -256,13 +256,13 @@ internal sealed class AuthMiddleware : IApiMiddleware
                 _managers = [];
                 _managersFor = key;
             }
-            if (!_managers.TryGetValue(scheme, out var manager))
-            {
-                var specUrl = spec is SecuritySchemeSpec.OAuth2 o ? (value.RefreshToken is not null ? o.RefreshUrl ?? o.TokenUrl : o.TokenUrl) : null;
-                Uri? baseUrl = Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var parsed) ? parsed : null;
-                manager = new OAuth2TokenManager(_core.HttpClient, value, specUrl, baseUrl, scheme, timeout: options.Timeout);
-                _managers[scheme] = manager;
-            }
+            // A scheme's value can be replaced on the same IAuthConfig (settings are read on every request): a manager
+            // serves only the value it was built from.
+            if (_managers.TryGetValue(scheme, out var cached) && ReferenceEquals(cached.Value, value)) return cached.Manager;
+            var specUrl = spec is SecuritySchemeSpec.OAuth2 o ? (value.RefreshToken is not null ? o.RefreshUrl ?? o.TokenUrl : o.TokenUrl) : null;
+            Uri? baseUrl = Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var parsed) ? parsed : null;
+            var manager = new OAuth2TokenManager(_core.HttpClient, value, specUrl, baseUrl, scheme, timeout: options.Timeout);
+            _managers[scheme] = (value, manager);
             return manager;
         }
     }

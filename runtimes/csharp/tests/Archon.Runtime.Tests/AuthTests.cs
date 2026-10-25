@@ -114,6 +114,26 @@ public class AuthTests
     }
 
     [Fact]
+    public async Task RecreatesTheManagerWhenTheSchemeValueIsReplaced()
+    {
+        using var server = TestServer.Start(r => r.Target == "/oauth/token"
+            ? TestResponse.Json(200, $"{{\"access_token\":\"for-{r.Header("authorization")}\"}}")
+            : new TestResponse(200, "ok"));
+        var values = new Dictionary<string, object?>
+        {
+            ["oauth"] = new OAuth2Value { ClientCredentials = new() { ClientId = "a", ClientSecret = "1" } },
+        };
+        var core = Core(server.Url, values);
+        await Call(core, Req("oauth"));
+        // Same IAuthConfig object, different value for the scheme: the old identity's token must not be reused.
+        values["oauth"] = new OAuth2Value { ClientCredentials = new() { ClientId = "b", ClientSecret = "2" } };
+        await Call(core, Req("oauth"));
+        var tokenRequests = server.Requests.Where(r => r.Target == "/oauth/token").Select(r => r.Header("authorization"));
+        Assert.Equal(["Basic YTox", "Basic Yjoy"], tokenRequests);
+        Assert.Equal("Bearer for-Basic Yjoy", server.Last.Header("authorization"));
+    }
+
+    [Fact]
     public async Task DoesNotRetry401ForUnmanagedToken()
     {
         using var server = TestServer.Start(_ => new TestResponse(401, "no"));
