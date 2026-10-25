@@ -6,7 +6,7 @@
 
 **Architecture:** `runtimes/rust` を Cargo のライブラリ crate（`archon-runtime`、lib 名 `archon_runtime`）として置き、生成時に `src/*.rs` を出力先の `src/core/` へコピーする（`lib.rs` → `mod.rs`、`crate::` → `crate::core::` に書き換え）。Rust プラグイン（`packages/archon/src/plugins/rust`）は inline の object / enum / union を巻き上げた IR から、モデル（`src/models/*.rs`）、タグ別サービス（`src/services/*.rs`、操作ごとのリクエストビルダー + `IntoFuture`）、`ApiClient` / `ApiClientBuilder` / `ApiAuth`、`src/lib.rs`、`Cargo.toml` を出力する。E2E は既存の `e2e/mock-server` を Node スクリプトで起動し、生成 SDK を path 依存で取り込む `e2e/rust` の結合テストを `cargo test` で実行する。
 
-**Tech Stack:** Rust 1.85+（edition 2021。開発環境は 1.99）、reqwest 0.13.5（`default-features = false`、TLS は feature）、serde 1.0.229（`derive`）、serde_json 1.0.154（`preserve_order`）、tokio 1.54.1（`time` / `sync`）。テストのみ: tokio の `macros` / `rt-multi-thread`。既存の Node 24 / pnpm 10 / vitest / jiti。
+**Tech Stack:** Rust 1.88+（edition 2021。`url` が依存する `icu_*` の要求。開発環境は 1.99）、reqwest 0.13.5（`default-features = false`、TLS は feature）、serde 1.0.229（`derive`）、serde_json 1.0.154（`preserve_order`）、tokio 1.54.1（`time` / `sync`）。テストのみ: tokio の `macros` / `rt-multi-thread`。既存の Node 24 / pnpm 10 / vitest / jiti。
 
 **Spec:** `docs/superpowers/specs/2026-10-25-archon-design.md`（特に §6、§7 Rust 列と注記、§8、§10）。挙動の規則は M2 / M3 の各タスクと同じものを Rust に写し、ここでは差分だけを書く。
 
@@ -274,7 +274,7 @@ impl ApiClient { pub const DEFAULT_BASE_URL: &'static str; pub fn new() -> Self;
 pub struct ApiClientBuilder;  // base_url / header / timeout / middleware / http_client / custom_auth / auth(ApiAuth) / build()
 #[derive(Clone, Debug, Default)] pub struct ApiAuth { pub bearer_auth: Option<core::TokenValue>, … }   // impl core::AuthConfig
 ```
-`Cargo.toml`（`project.ts`。`REQWEST_VERSION = '0.13.5'`、`SERDE_VERSION = '1.0.229'`、`SERDE_JSON_VERSION = '1.0.154'`、`TOKIO_VERSION = '1.54.1'`、`RUST_VERSION = '1.85'` を export）。
+`Cargo.toml`（`project.ts`。`REQWEST_VERSION = '0.13.5'`、`SERDE_VERSION = '1.0.229'`、`SERDE_JSON_VERSION = '1.0.154'`、`TOKIO_VERSION = '1.54.1'`、`RUST_VERSION = '1.88'` を export）。
 
 - [ ] **Step 1:** 失敗するテスト: services（引数順、衝突、キーワード、OperationSpec、最小 2xx、no-content は `()`、nullable 成功型、エラー enum と match 順、multipart の add_file / add_files、非 object form、include / exclude、methodName hook）、client（DEFAULT_BASE_URL、SECURITY_SCHEMES、ApiAuth、アクセサ名の予約、Cargo.toml のメタデータと追加依存、`package: false`、ランタイムのコピー）、versions、symbols。
 - [ ] **Step 2〜4:** FAIL → 実装 → PASS。

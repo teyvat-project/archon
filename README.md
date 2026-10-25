@@ -3,9 +3,9 @@
 OpenAPI 3.0 / 3.1 の仕様から、**外部依存を最小化した** SDK を生成するジェネレータ（Meta SDK）です。
 設計の詳細は [`docs/superpowers/specs/2026-10-25-archon-design.md`](docs/superpowers/specs/2026-10-25-archon-design.md) を参照してください。
 
-現在は **M1〜M4（コア + TypeScript / C# / Kotlin / Swift プラグイン）** まで実装済みです。生成される SDK の依存は最小限（TypeScript は `fetch` のみ、
-C# は BCL のみ、Kotlin は `ktor-client-core` と `kotlinx-serialization-json` のみ、Swift は Foundation のみ）で、手書きのランタイムは生成物の `core/`
-（C# は `Core/`、Swift は `Sources/<Module>Core/`）にそのままコピーされます。
+現在は **M1〜M5（コア + TypeScript / C# / Kotlin / Swift / Rust プラグイン）** まで実装済みです。生成される SDK の依存は最小限（TypeScript は `fetch` のみ、
+C# は BCL のみ、Kotlin は `ktor-client-core` と `kotlinx-serialization-json` のみ、Swift は Foundation のみ、Rust は `reqwest` / `serde` / `serde_json` /
+`tokio` のみ）で、手書きのランタイムは生成物の `core/`（C# は `Core/`、Swift は `Sources/<Module>Core/`、Rust は `src/core/`）にそのままコピーされます。
 
 ## インストール
 
@@ -119,6 +119,18 @@ Kotlin プラグイン（`kotlin()`）の主なオプション（すべて任意
 | `naming` | 型 PascalCase、メソッド・プロパティ camelCase | `{ type, method, property, file }` ごとに `{ case, name }` |
 | `typeMappings` | `{}` | `'integer': 'Long'` や `'string:date-time': { type: 'kotlinx.datetime.Instant', serializer: 'kotlinx.datetime.serializers.InstantIso8601Serializer' }` のような `kind:format` / `kind` → Kotlin 型（文字列なら serializer は `<type>.serializer()`） |
 | `hooks` | `{}` | `typeName` / `methodName` / `propertyName` / `fileName` / `typeOverride`（Kotlin 型、または `{ type, serializer }`） |
+| `include` / `exclude` | なし | プラグイン単位の操作フィルタ |
+
+Rust プラグイン（`rust()`）の主なオプション（すべて任意）:
+
+| オプション | 既定 | 内容 |
+|---|---|---|
+| `output` | `'rust'` | 出力サブディレクトリ |
+| `clientName` | `'ApiClient'` | クライアント構造体名（ビルダーは `<clientName>Builder`） |
+| `package` | info から導出 | `Cargo.toml` の `name`（既定 title の kebab-case）/ `version`（既定 `info.version`、semver でなければ `0.1.0`）/ `description` / `license` / `authors` / `repository` / 追加の `dependencies`（`[dependencies]` にそのまま書く行）。`false` で `Cargo.toml` を生成しない |
+| `naming` | 型 PascalCase、メソッド・フィールド snake_case、ファイルは型名の snake_case | `{ type, method, property, file }` ごとに `{ case, name }` |
+| `typeMappings` | `{}` | `'integer': 'i32'` や `'string:date-time': 'chrono::DateTime<chrono::Utc>'` のような `kind:format` / `kind` → Rust 型（serde を実装していること） |
+| `hooks` | `{}` | `typeName` / `methodName` / `propertyName` / `fileName` / `typeOverride`（Rust 型） |
 | `include` / `exclude` | なし | プラグイン単位の操作フィルタ |
 
 ## 生成された SDK の使い方
@@ -389,6 +401,55 @@ let result = try await client.catalyst.getCatalystV1StatusByIdWithResponse(id: "
 - 値型が自分自身を値で含む循環（`Node.parent: Node?`、`A.b` ↔ `B.a`）は、該当プロパティをランタイムの `Indirect` に格納します（公開されるのは通常のプロパティです）。
 - 他言語との意図的な差分: Foundation の `URL` が受け付けない `|` `[` `]` は path / query で常に percent-encode します（`piped=1%7C2`、`filter%5Bstatus%5D=active`。サーバーでデコードした値は同じ）。空の JSON 応答（204 など）は戻り値型が Optional なら `nil`、そうでなければ `DecodeError` です。JSON の直列化はキー順を宣言順に保つためランタイムの `JSONValueEncoder` / `ApiJSON` を使い（`JSONEncoder` はキー順を保持しません）、デコードは `JSONDecoder` です。
 
+## 生成された Rust SDK の使い方
+
+stable Rust（edition 2021、1.88 以降。依存の `url` / `icu_*` が 1.88 を要求するため）向けで、依存は `reqwest`（`default-features = false`）/ `serde` / `serde_json`（`preserve_order`）/
+`tokio`（`time` / `sync` のみ）です。TLS は feature で選びます（既定 `rustls`、`--no-default-features --features native-tls` で native-tls）。
+非同期ランタイムは tokio を前提にしますが、SDK 自身はタスクを spawn しません。
+
+```
+rust/
+  Cargo.toml                  # package: false なら出力しない
+  src/
+    lib.rs                    # pub use ApiClient / ApiClientBuilder / ApiAuth
+    client.rs  auth.rs        # クライアントとビルダー、スキーム名ごとの型付き認証設定
+    models/*.rs               # schema ごとに 1 ファイル（models::Pet のように再エクスポート）
+    services/<group>.rs       # タグ（group）ごとのサービス、操作ごとのリクエストビルダーとエラー enum
+    core/*.rs                 # ランタイム（runtimes/rust/src のコピー）
+```
+
+```rust
+use std::time::Duration;
+
+use natsuneko_laboratory_api::core::{RetryMiddleware, TokenValue};
+use natsuneko_laboratory_api::{ApiAuth, ApiClient};
+
+let client = ApiClient::builder()
+    .base_url("https://api.natsuneko.com")                                // 既定は servers[0]（ApiClient::DEFAULT_BASE_URL）
+    .auth(ApiAuth { bearer_auth: Some("token".into()), ..Default::default() }) // または TokenValue::provider(|| async { fetch_token().await })
+    .timeout(Duration::from_secs(30))
+    .middleware(RetryMiddleware::new())
+    .build();
+
+let status = client.catalyst().get_catalyst_v1_status_by_id("123").await?;      // ApiResponse<T>: status / headers / url / data
+let posts = client.catalyst().get_catalyst_v11_timeline_album_by_id("album").limit(20).send().await?; // 任意パラメータは setter
+```
+
+- 必須パラメータ（path → 必須 body → 必須 query / header / cookie）はメソッドの引数（`impl Into<T>`）、任意パラメータはビルダーの同名 setter です。ビルダーは `.await`（`IntoFuture`）か `.send().await` で送ります。`.request_options(RequestOptions::new().header(…))` で呼び出しごとのヘッダ・extensions・base URL を指定できます。`ApiClient` の clone は安価で、clone 同士はコネクションプール・middleware・トークンを共有します。
+- 結果は `Result<ApiResponse<T>, core::Error<E>>` です。非 2xx は `Error::Api`（`status` / `headers` / `url` / `raw_body` / `body`）で、`body` には操作ごとのエラー enum（`GetErrorError::Status404(NotFoundError)`、範囲は `Status4xx`、`default` は `Default`）に宣言どおりデコードできたときだけ値が入ります。宣言の無い操作の `E` は `()` です。通信失敗・タイムアウトは `Error::Transport`（`timed_out`）、2xx ボディのデコード失敗は `Error::Decode`（`raw_body`）、必須認証の未設定は送信前に `Error::Auth`（`schemes`）、組み立てられないリクエスト（必須 path の欠落、CR / LF を含むヘッダ、相対 base URL）は `Error::InvalidRequest` です。キャンセルは future の drop です。
+- 認証は `ApiAuth` のフィールド（スキーム名の snake_case）に設定します: bearer / apiKey は `TokenValue`、basic は `BasicValue`、OAuth2 / OpenID Connect は `OAuth2Value`（`access_token` / `client_credentials` / `refresh_token`）。トークンは期限 30 秒前に先回り更新、同時取得は 1 回にまとめ、管理トークンで 401 を受けたら 1 回だけ更新して再送します。未対応スキームは `custom_auth` で扱います。
+- Middleware は `core::Middleware` トレイトを実装するか、`middleware_fn(|req, ctx, next| Box::pin(async move { next.run(req).await }))` で作り、ビルダーの `middleware(...)` か `client.use_middleware(...)` で登録します。登録順に外側から実行され、認証は最内側で適用されます（`next` は `Copy` なので何度でも呼べます）。標準: `LoggingMiddleware`（資格情報をマスク）/ `UserAgentMiddleware` / `RetryMiddleware` / `Retry401Middleware`。
+- `reqwest::Client` は後から設定を変えられないため、渡す場合は `core::http_client_builder()`（リダイレクト無効）から作ってください。リダイレクトはランタイムが手動で追い、別オリジンへ移るときは `Authorization` / `Cookie` / API キー（ヘッダ・クエリ）を外します。リダイレクトを追う Client を渡すと reqwest 自身の挙動（`Authorization` / `Cookie` は外すが API キーは残る）になります。
+
+型の対応: `date-time` / `date` / `uuid` / `uri` / `byte` → `String`（`typeMappings` と `package.dependencies` で `chrono` / `uuid` に差し替え可）、`int64` と format 無しの integer → `i64`（`int32` → `i32`）、`float` → `f32`、その他の number → `f64`、`binary` → `ApiFile`（`Vec<u8>` + ファイル名 + Content-Type）、未知の schema → `serde_json::Value`、additionalProperties → `HashMap<String, T>`、任意 / nullable → `Option<T>`。予約語は `r#type` のような raw identifier（`self` などは `self_`）、`Vec<T>` を挟まずに自分を含む型は `Box<T>` で持ちます。
+
+- **enum** は `Unknown(…)` バリアントを持つ enum です（`Status::Active`、`status.as_str()` / `priority.value()`、`is_known()`、`KNOWN_VALUES`、`From<&str>`）。未知の値も再送できます。比較は値で行います。
+- **判別あり union** は判別値でバリアントを選ぶ enum（`Shape::Circle(Circle)`）、**判別なし union** は `#[serde(untagged)]` の enum で、バリアントを宣言順に試して最初に読めたものを採用します。どれにも当たらなければ `Unknown(serde_json::Value)` に生 JSON をそのまま保持し、そのまま書き戻せます。判別プロパティはバリアントの構造体に残ります（`Circle { kind: "circle".into(), .. }`）。
+- 任意プロパティの `None` は送信しません。宣言型が `Option` でない成功応答が空（204 など）のときは `Error::Decode` になります。
+- multipart は reqwest の `multipart` ではなくランタイムが組み立てるので、リトライ・リダイレクト・401 再送でも同じ body を送り直せます。
+
+生成した SDK は Cargo の path / git 依存として取り込めます（`cargo check` で確認できます）。
+
 ## カスタムプラグイン
 
 `definePlugin` で作ります。依存プラグイン（ここでは `typescript`）の公開 API `symbols` から、生成済みの型名・関数名を参照できます。
@@ -430,7 +491,7 @@ export default defineConfig({
 | M2 | C#（.NET 10）プラグイン & BCL のみのランタイム | 実装済み |
 | M3 | Kotlin（JVM 11+ / Android）プラグイン & ktor-client-core + kotlinx-serialization-json のみのランタイム | 実装済み |
 | M4 | Swift 6 プラグイン & Foundation のみのランタイム（Apple プラットフォーム / Linux） | 実装済み |
-| M5 | Rust | 未着手 |
+| M5 | Rust（stable、edition 2021）プラグイン & reqwest + serde + serde_json + tokio のみのランタイム | 実装済み |
 | M6 | Go 1.22+ | 未着手 |
 | M7 | Ruby 3.2+ | 未着手 |
 
@@ -448,6 +509,8 @@ pnpm test:e2e:kotlin   # 同じシナリオを生成 Kotlin SDK で実行する 
 runtimes/kotlin/gradlew -p runtimes/kotlin test   # Kotlin ランタイムの単体テスト（Gradle wrapper 同梱）
 pnpm test:e2e:swift    # 同じシナリオを生成 Swift SDK で実行する E2E（e2e/swift、要 Swift 6.1+）
 swift test --package-path runtimes/swift                 # Swift ランタイムの単体テスト（swift-testing）
+pnpm test:e2e:rust     # 同じシナリオを生成 Rust SDK で実行する E2E（e2e/rust、要 cargo）
+cargo test --manifest-path runtimes/rust/Cargo.toml   # Rust ランタイムの単体テスト
 pnpm build       # 全パッケージのビルド
 pnpm -F @natsuneko-laboratory/archon-e2e-typescript smoke bun   # 生成 SDK を Bun / Deno（`smoke deno`）でモックサーバに対して実行
 ```
@@ -457,6 +520,7 @@ CI（`.github/workflows/ci.yml`）は上記に加え、ランタイムの単体�
 C# 生成物のコンパイルテスト（`dotnet build -warnaserror`）は .NET 10 以降の SDK が無ければスキップされます（CI では `actions/setup-dotnet` で入れて実行します）。
 Kotlin 生成物のコンパイルテスト（`gradle build`、警告をエラー扱い）は JDK 17 以降が無ければスキップされます（CI では `actions/setup-java` で入れて実行します）。
 Swift 生成物のコンパイルテスト（`swift build -Xswiftc -warnings-as-errors`）は Swift 6 以降が無ければスキップされます。Swift のランタイム単体テストと E2E は、CI で Linux（`swift:6.2` コンテナ）と macOS の両方で実行します。
+Rust 生成物のコンパイルテスト（`cargo clippy -- -D warnings`）は `cargo` が無ければスキップされます（CI では `dtolnay/rust-toolchain` で入れて実行します）。
 
 ### ライブスモーク（手動）
 
