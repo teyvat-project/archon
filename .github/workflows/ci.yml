@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Jobs are grouped per target language. A new language adds its own jobs (toolchain setup, build, E2E
+# against the shared mock server) and lists them in `ci-ok` below.
+jobs:
+  # ---- Workspace (core + TypeScript plugin) ----
+
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-workspace
+      - run: pnpm typecheck
+
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # No Windows: the generator tests spawn `node_modules/.bin/tsc`, which is not portable there.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-workspace
+      - run: pnpm test
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-workspace
+      - run: pnpm -F @natsuneko-laboratory/archon build
+      - name: Check the packed tarball contents
+        working-directory: packages/archon
+        run: |
+          npm pack --dry-run --json --ignore-scripts > "$RUNNER_TEMP/pack.json"
+          node -e '
+            const [{ files }] = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+            const paths = files.map((f) => f.path);
+            const required = ["dist/cli.js", "dist/index.js", "dist/index.d.ts", "dist/plugins.js", "dist/plugins.d.ts"];
+            const missing = required.filter((p) => !paths.includes(p));
+            if (!paths.some((p) => p.startsWith("runtimes/typescript/"))) missing.push("runtimes/typescript/**");
+            console.log(paths.join("\n"));
+            if (missing.length > 0) {
+              console.error(`::error::package is missing ${missing.join(", ")}`);
+              process.exit(1);
+            }
+          ' "$RUNNER_TEMP/pack.json"
+
+  # ---- TypeScript SDK ----
+
+  e2e-typescript:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-workspace
+      - run: pnpm test:e2e
+
+  # The generated SDK copies runtimes/typescript and claims Node.js 18+. Dependencies are installed with
+  # the workspace's Node 24, then the runtime's own suite runs on each supported Node line.
+  runtime-typescript-node:
+    name: runtime-typescript (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['18', '20', '22', '24']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-workspace
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --version && ./node_modules/.bin/vitest run
+        working-directory: runtimes/typescript
+
+  # Generates the edge-cases SDK and runs e2e/typescript/smoke/smoke.ts under Bun / Deno against the mock server.
+  runtime-typescript-smoke:
+    name: runtime-typescript (${{ matrix.runtime }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [bun, deno]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-workspace
+      - if: matrix.runtime == 'bun'
+        uses: oven-sh/setup-bun@v2
+      - if: matrix.runtime == 'deno'
+        uses: denoland/setup-deno@v2.0.5
+      - run: ${{ matrix.runtime }} --version && pnpm -F @natsuneko-laboratory/archon-e2e-typescript smoke ${{ matrix.runtime }}
+
+  # Single required check for branch protection; add new jobs to `needs`.
+  ci-ok:
+    if: always()
+    needs: [typecheck, test, build, e2e-typescript, runtime-typescript-node, runtime-typescript-smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail if any job did not succeed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: exit 1
+      - run: echo "all jobs succeeded"

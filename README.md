@@ -312,6 +312,7 @@ export default defineConfig({
 | M4 | Swift 6 | 未着手 |
 | M5 | Rust | 未着手 |
 | M6 | Go 1.22+ | 未着手 |
+| M7 | Ruby 3.2+ | 未着手 |
 
 M1 の TypeScript プラグインでは `bigint`（int64）オプション、`naming.property` / `hooks.propertyName` / `naming.file` / `hooks.fileName` は提供していません。
 
@@ -324,9 +325,12 @@ pnpm test:e2e    # モックサーバに対して生成 SDK を実行する E2E�
 pnpm test:e2e:csharp   # 同じシナリオを生成 C# SDK で実行する E2E（e2e/csharp、要 .NET 10 SDK）
 dotnet test runtimes/csharp/tests/Archon.Runtime.Tests   # C# ランタイムの単体テスト
 pnpm build       # 全パッケージのビルド
+pnpm -F @natsuneko-laboratory/archon-e2e-typescript smoke bun   # 生成 SDK を Bun / Deno（`smoke deno`）でモックサーバに対して実行
 ```
 
-C# 生成物のコンパイルテスト（`dotnet build -warnaserror`）は `dotnet` が PATH に無ければスキップされます。
+CI（`.github/workflows/ci.yml`）は上記に加え、ランタイムの単体テストを Node.js 18 / 20 / 22 / 24 で、生成 SDK のスモークを Bun / Deno で実行します。
+
+C# 生成物のコンパイルテスト（`dotnet build -warnaserror`）は .NET 10 以降の SDK が無ければスキップされます（CI では `actions/setup-dotnet` で入れて実行します）。
 
 ### ライブスモーク（手動）
 
@@ -336,6 +340,8 @@ C# 生成物のコンパイルテスト（`dotnet build -warnaserror`）は `dot
 ```sh
 node --experimental-strip-types scripts/live-smoke.ts
 ```
+
+GitHub Actions の `Live smoke` ワークフロー（`workflow_dispatch` のみ）からも実行できます。
 
 `security: []` の操作を優先し、足りなければ任意認証の操作で埋めます。spec の宣言と実 API の挙動が食い違う操作は `scripts/live-smoke.ts` の `KNOWN_SPEC_MISMATCHES`（理由付きのスキップリスト）に載せて除外し、実行時に `skip` と表示します（現在は `GET /feature-flags/v1/me`: spec は認証不要だが実 API は 401）。
 natsuneko の spec で条件を満たす操作は現状 2 件（`/catalyst/v1/announcements`、任意認証の `/catalyst/v1.1/timeline/newcomers`）のみのため、2 件以上あれば成功とし、3 件未満のときはその旨を表示します。
