@@ -3,9 +3,10 @@ package archon.runtime
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 
 /**
- * The parameter values of one call. Values are converted to JSON with their generated serializer,
+ * The parameter values (and the body) of one call. Values are converted to JSON with their generated serializer,
  * so the parameter serializer sees objects in declaration order and enums as their raw values.
  */
 public class RequestValues {
@@ -22,6 +23,43 @@ public class RequestValues {
 
     public fun <T> cookie(name: String, value: T, serializer: KSerializer<T>): RequestValues =
         add(ParamLocation.Cookie, name, value, serializer)
+
+    /** Creates the body for the operation's media type; `null` when no body was set. */
+    internal var bodyFactory: ((mediaType: String?) -> ApiBody)? = null
+        private set
+
+    public fun <T> jsonBody(value: T, serializer: KSerializer<T>): RequestValues {
+        val bytes = ApiJson.encodeToString(serializer, value).encodeToByteArray()
+        bodyFactory = { mediaType -> BytesBody(bytes, mediaType ?: "application/json") }
+        return this
+    }
+
+    /** An `application/x-www-form-urlencoded` body from the value's JSON properties. */
+    public fun <T> formBody(value: T, serializer: KSerializer<T>): RequestValues {
+        val element = ApiJson.encodeToJsonElement(serializer, value)
+        require(element is JsonObject) { "A form body must be a JSON object." }
+        val body = FormBody.fromJson(element)
+        bodyFactory = { body }
+        return this
+    }
+
+    /** A body built by hand (multipart, a channel, ...). */
+    public fun body(body: ApiBody): RequestValues {
+        bodyFactory = { body }
+        return this
+    }
+
+    public fun textBody(value: String): RequestValues {
+        val bytes = value.encodeToByteArray()
+        bodyFactory = { mediaType -> BytesBody(bytes, mediaType ?: "text/plain") }
+        return this
+    }
+
+    /** A raw body, sent with the file's content type or else the operation's media type. */
+    public fun binaryBody(file: ApiFile): RequestValues {
+        bodyFactory = { mediaType -> BytesBody(file.content, file.contentType ?: mediaType ?: "application/octet-stream") }
+        return this
+    }
 
     /** The value of a parameter, or `null` when it was not set (or set to null). */
     internal fun get(location: ParamLocation, name: String): JsonElement? = values[location to name]

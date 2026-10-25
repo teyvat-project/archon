@@ -57,7 +57,7 @@ internal object ParameterSerializer {
         collect(specs, ParamLocation.Cookie, values).takeIf { it.isNotEmpty() }?.joinToString("; ")
 
     /** The text of a scalar: strings unquoted, numbers as JavaScript prints them, booleans as `true` / `false`. */
-    private fun text(value: JsonElement): String = when (value) {
+    internal fun text(value: JsonElement): String = when (value) {
         is JsonPrimitive -> if (value.isString || value is JsonNull) value.content else JsNumber.format(value.content)
         else -> value.toString()
     }

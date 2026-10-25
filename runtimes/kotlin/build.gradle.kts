@@ -43,4 +43,6 @@ kotlin {
 
 tasks.test {
     useJUnitPlatform()
+    // Ktor logs through SLF4J; without a provider on the test classpath it warns on every run.
+    systemProperty("slf4j.internal.verbosity", "ERROR")
 }
