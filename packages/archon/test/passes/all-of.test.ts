@@ -219,4 +219,44 @@ describe('flattenAllOf', () => {
       expect(list?.kind === 'array' ? list.items.kind : undefined).toBe('object');
     }
   });
+
+  it('terminates on a self-referencing allOf inside the target object (property)', () => {
+    // Node.next = allOf[$ref Node]: 展開すると無限に続くので intersection のまま残す。
+    const next = allOf([ref('Node')], { origin: '#/components/schemas/Node/properties/next' });
+    const ir = doc({ Node: obj({ next }) });
+    const diagnostics = new Diagnostics();
+    expect(() => flattenAllOf(ir, diagnostics)).not.toThrow();
+    const node = ir.schemas.get('Node');
+    expect(node?.kind === 'object' ? node.properties[0]?.schema.kind : undefined).toBe('intersection');
+    expect(diagnostics.entries.map((e) => e.code)).toEqual(['allof-not-flattened']);
+  });
+
+  it('terminates on a self-referencing allOf inside the target object (array items)', () => {
+    const items = allOf([ref('Tree')], { origin: '#/components/schemas/Tree/properties/children/items' });
+    const ir = doc({
+      Tree: obj({ children: { kind: 'array', nullable: false, items } as IRSchema }),
+      Ext: allOf([ref('Tree'), obj({ v: int })], { origin: '#/components/schemas/Ext' }),
+    });
+    const diagnostics = new Diagnostics();
+    expect(() => flattenAllOf(ir, diagnostics)).not.toThrow();
+    const tree = ir.schemas.get('Tree');
+    const children = tree?.kind === 'object' ? tree.properties[0]?.schema : undefined;
+    expect(children?.kind === 'array' ? children.items.kind : undefined).toBe('intersection');
+    // Ext は Tree のコピーに循環する allOf を含むので、そのまま残す
+    expect(ir.schemas.get('Ext')?.kind).toBe('intersection');
+  });
+
+  it('reports each unflattened intersection origin only once', () => {
+    const missing = allOf([ref('Nope')], { origin: '#/components/schemas/Base/properties/x' });
+    const ir = doc({
+      Base: obj({ x: missing }),
+      A: allOf([ref('Base'), obj({ a: str })], { origin: '#/components/schemas/A' }),
+      B: allOf([ref('Base'), obj({ b: str })], { origin: '#/components/schemas/B' }),
+    });
+    const diagnostics = new Diagnostics();
+    flattenAllOf(ir, diagnostics);
+    const pointers = diagnostics.entries.map((e) => e.pointer);
+    expect(pointers.filter((p) => p === '#/components/schemas/Base/properties/x')).toHaveLength(1);
+    expect(new Set(pointers).size).toBe(pointers.length);
+  });
 });
