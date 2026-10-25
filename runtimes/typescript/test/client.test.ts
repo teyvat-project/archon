@@ -245,6 +245,7 @@ describe('createClient', () => {
         key: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
         q: { type: 'apiKey', in: 'query', name: 'api_key' },
       },
+      auth: { key: 'k' },
       fetch,
       middleware: [
         (req, next, ctx) => {

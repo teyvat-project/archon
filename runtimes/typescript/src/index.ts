@@ -5,3 +5,6 @@ export * from './body.js';
 export * from './middleware.js';
 export * from './transport.js';
 export * from './client.js';
+export { base64Encode } from './base64.js';
+export { createAuthMiddleware, selectRequirement, type Selection } from './auth.js';
+export { OAuth2TokenManager } from './oauth2.js';
