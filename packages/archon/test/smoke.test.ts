@@ -17,5 +17,5 @@ test('package.json builds before packing and declares the supported Node version
     engines?: Record<string, string>;
   };
   expect(pkg.scripts['prepack']).toBe('pnpm run build');
-  expect(pkg.engines).toEqual({ node: '>=18' });
+  expect(pkg.engines).toEqual({ node: '>=22.19.0' });
 });

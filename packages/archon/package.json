@@ -26,7 +26,7 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.19.0"
   },
   "dependencies": {
     "@apidevtools/json-schema-ref-parser": "^16.0.5",
