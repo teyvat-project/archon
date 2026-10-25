@@ -73,6 +73,42 @@ describe('OAuth2TokenManager', () => {
     expect(calls[0]!.url).toBe('https://cfg.test/token');
   });
 
+  describe('relative token URLs (resolved against baseUrl)', () => {
+    const resolveCase = async (tokenUrl: string, baseUrl: string | undefined, configured?: string) => {
+      const { fetch, calls } = tokenFetch(() => json({ access_token: 'tok' }));
+      const m = new OAuth2TokenManager({
+        fetch,
+        config: { clientCredentials: configured === undefined ? cc : { ...cc, tokenUrl: configured } },
+        tokenUrl,
+        ...(baseUrl !== undefined && { baseUrl }),
+      });
+      await m.getToken([]);
+      return calls[0]!.url;
+    };
+
+    it('resolves an absolute-path tokenUrl against the origin of a baseUrl with a path prefix', async () => {
+      await expect(resolveCase('/oauth/token', 'http://h/api/')).resolves.toBe('http://h/oauth/token');
+    });
+
+    it('resolves a path-relative tokenUrl against the baseUrl path', async () => {
+      await expect(resolveCase('oauth/token', 'http://h/api/')).resolves.toBe('http://h/api/oauth/token');
+    });
+
+    it('leaves an absolute tokenUrl unchanged', async () => {
+      await expect(resolveCase('https://auth.test/token', 'http://h/api/')).resolves.toBe('https://auth.test/token');
+    });
+
+    it('resolves a relative tokenUrl from the config as well', async () => {
+      await expect(resolveCase('https://spec.test/token', 'http://h:8080/api', '/cfg/token')).resolves.toBe(
+        'http://h:8080/cfg/token',
+      );
+    });
+
+    it('passes a relative tokenUrl through unchanged without a baseUrl', async () => {
+      await expect(resolveCase('/oauth/token', undefined)).resolves.toBe('/oauth/token');
+    });
+  });
+
   it('throws AuthError when no tokenUrl is available', async () => {
     const { fetch, calls } = tokenFetch(() => json({ access_token: 'tok' }));
     const m = new OAuth2TokenManager({ fetch, config: { clientCredentials: cc } });

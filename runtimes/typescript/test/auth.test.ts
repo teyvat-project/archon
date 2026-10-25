@@ -289,6 +289,42 @@ describe('createAuthMiddleware', () => {
       expect(server.calls[0]!.url).toBe('https://auth.test/refresh');
     });
 
+    it("resolves a relative spec tokenUrl / refreshUrl against the client's baseUrl", async () => {
+      const relative: Record<string, SecuritySchemeSpec> = {
+        cc: { type: 'oauth2', tokenUrl: '/oauth/token' },
+        rt: { type: 'oauth2', tokenUrl: '/oauth/token', refreshUrl: 'oauth/refresh' },
+      };
+      const server = tokenServer();
+      const t = setup(
+        {
+          baseUrl: 'http://h/api/',
+          securitySchemes: relative,
+          auth: { cc: { clientCredentials: cc }, rt: { refreshToken: { refreshToken: 'r', clientId: 'id' } } },
+          fetch: server.fetch,
+        },
+        [[...req_('cc'), ...req_('rt')]],
+      );
+      await t.mw(makeReq(), t.next, t.ctx);
+      expect(server.calls.map((c) => c.url)).toEqual(['http://h/oauth/token', 'http://h/api/oauth/refresh']);
+    });
+
+    it('re-resolves the tokenUrl after the baseUrl changes', async () => {
+      const server = tokenServer();
+      const t = setup(
+        {
+          baseUrl: 'http://a.test',
+          securitySchemes: { cc: { type: 'oauth2', tokenUrl: '/oauth/token' } },
+          auth: { cc: { clientCredentials: cc } },
+          fetch: server.fetch,
+        },
+        [req_('cc')],
+      );
+      await t.mw(makeReq(), t.next, t.ctx);
+      t.setConfig({ baseUrl: 'http://b.test' });
+      await t.mw(makeReq(), t.next, t.ctx);
+      expect(server.calls.map((c) => c.url)).toEqual(['http://a.test/oauth/token', 'http://b.test/oauth/token']);
+    });
+
     it('works for openIdConnect with an explicit tokenUrl', async () => {
       const server = tokenServer();
       const t = setup(

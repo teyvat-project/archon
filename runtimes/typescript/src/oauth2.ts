@@ -9,6 +9,8 @@ export interface OAuth2TokenManagerOptions {
   config: OAuth2Value;
   /** Default token endpoint (from the spec); a `tokenUrl` inside `config` takes precedence. */
   tokenUrl?: string;
+  /** Base that a relative token URL is resolved against (the client's `baseUrl`), as `new URL(tokenUrl, baseUrl)`. */
+  baseUrl?: string;
   /** Tokens are renewed this many milliseconds before they expire. Default 30_000. */
   leewayMs?: number;
   now?: () => number;
@@ -35,6 +37,7 @@ export class OAuth2TokenManager {
   private readonly fetchImpl: FetchLike;
   private readonly config: OAuth2Value;
   private readonly specTokenUrl: string | undefined;
+  private readonly baseUrl: string | undefined;
   private readonly leewayMs: number;
   private readonly now: () => number;
   private readonly schemes: string[];
@@ -46,6 +49,7 @@ export class OAuth2TokenManager {
     this.fetchImpl = opts.fetch;
     this.config = opts.config;
     this.specTokenUrl = opts.tokenUrl;
+    this.baseUrl = opts.baseUrl;
     this.leewayMs = opts.leewayMs ?? DEFAULT_LEEWAY_MS;
     this.now = opts.now ?? (() => Date.now());
     this.schemes = opts.scheme === undefined ? [] : [opts.scheme];
@@ -104,8 +108,9 @@ export class OAuth2TokenManager {
     const refresh = this.config.refreshToken;
     const flow = refresh ?? this.config.clientCredentials;
     if (!flow) throw new AuthError('OAuth2 scheme has neither clientCredentials nor refreshToken configured', this.schemes);
-    const tokenUrl = flow.tokenUrl ?? this.specTokenUrl;
-    if (!tokenUrl) throw new AuthError('No tokenUrl configured for the OAuth2 token request', this.schemes);
+    const configuredUrl = flow.tokenUrl ?? this.specTokenUrl;
+    if (!configuredUrl) throw new AuthError('No tokenUrl configured for the OAuth2 token request', this.schemes);
+    const tokenUrl = this.baseUrl === undefined ? configuredUrl : new URL(configuredUrl, this.baseUrl).toString();
 
     const form: [string, string][] = [];
     const headers = new Headers({ 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' });

@@ -71,7 +71,7 @@ function setCookie(headers: Headers, name: string, value: string): void {
 }
 
 export function createAuthMiddleware(getConfig: () => ClientConfig<any>): Middleware {
-  let managersFor: { auth: unknown; schemes: unknown } | undefined;
+  let managersFor: { auth: unknown; schemes: unknown; baseUrl: string } | undefined;
   let managers = new Map<string, OAuth2TokenManager>();
 
   const fetchImpl = (input: Request | string | URL, init?: RequestInit) => {
@@ -87,15 +87,27 @@ export function createAuthMiddleware(getConfig: () => ClientConfig<any>): Middle
   }
 
   function managerFor(config: ClientConfig<any>, scheme: string, spec: SecuritySchemeSpec, value: OAuth2Value) {
-    if (!managersFor || managersFor.auth !== config.auth || managersFor.schemes !== config.securitySchemes) {
+    if (
+      !managersFor ||
+      managersFor.auth !== config.auth ||
+      managersFor.schemes !== config.securitySchemes ||
+      managersFor.baseUrl !== config.baseUrl
+    ) {
       managers = new Map();
-      managersFor = { auth: config.auth, schemes: config.securitySchemes };
+      managersFor = { auth: config.auth, schemes: config.securitySchemes, baseUrl: config.baseUrl };
     }
     let manager = managers.get(scheme);
     if (!manager) {
       const specUrl =
         spec.type === 'oauth2' ? (value.refreshToken ? (spec.refreshUrl ?? spec.tokenUrl) : spec.tokenUrl) : undefined;
-      manager = new OAuth2TokenManager({ fetch: fetchImpl, config: value, tokenUrl: specUrl, scheme });
+      // A relative tokenUrl (e.g. `/oauth/token`) is resolved against the client's baseUrl.
+      manager = new OAuth2TokenManager({
+        fetch: fetchImpl,
+        config: value,
+        tokenUrl: specUrl,
+        baseUrl: config.baseUrl,
+        scheme,
+      });
       managers.set(scheme, manager);
     }
     return manager;
