@@ -426,3 +426,90 @@ function specBlock(sdk: string, name: string): string {
   if (start < 0) throw new Error(`spec of ${name} not found`);
   return sdk.slice(start, sdk.indexOf('\n};', start) + 3);
 }
+
+describe('typescript plugin: error types with dates=Date', () => {
+  // Error bodies are never transformed by the runtime, so their dates stay strings.
+  const problem = obj([prop('timestamp', dateTime, true), prop('detail', str)]);
+  const errorDatesIR = (): IRDocument => ({
+    info: { title: 'Error Dates', version: '1.0.0' },
+    servers: [],
+    securitySchemes: new Map(),
+    schemas: new Map<string, IRSchema>([
+      ['Problem', problem],
+      ['Plain', obj([prop('message', str, true)])],
+    ]),
+    operations: [
+      operation('GET /thing', 'getThing', {
+        responses: [
+          response(200, [json(ref('Problem'))]),
+          response(400, [json(obj([prop('timestamp', dateTime, true)]))]),
+          response(404, [json(ref('Problem'))]),
+          response(409, [json(arr(ref('Problem')))]),
+          response('default', [json(ref('Plain'))]),
+        ],
+      }),
+    ],
+  });
+
+  it('renders inline error dates as string and wraps named date-bearing schemas in DatesAsString', async () => {
+    const sdk = await sdkOf(errorDatesIR(), { dates: 'Date' });
+    expect(sdk).toContain(
+      [
+        'export type GetThingErrors = {',
+        '  400: {',
+        '    timestamp: string;',
+        '  };',
+        '  404: DatesAsString<Problem>;',
+        '  409: DatesAsString<Problem[]>;',
+        '  default: Plain;',
+        '};',
+      ].join('\n'),
+    );
+    expect(sdk).toContain('export type GetThingResponses = {\n  200: Problem;\n};');
+    expect(sdk).toContain(
+      [
+        '/**',
+        ' * Error bodies are not transformed, so `Date` members of shared schemas stay JSON strings.',
+        ' */',
+        'export type DatesAsString<T> = T extends Date',
+        '  ? string',
+        '  : T extends Blob',
+        '    ? T',
+        '    : T extends object',
+        '      ? { [K in keyof T]: DatesAsString<T[K]> }',
+        '      : T;',
+      ].join('\n'),
+    );
+  });
+
+  it('does not emit the helper with dates=string or when no error needs it', async () => {
+    expect(await sdkOf(errorDatesIR())).not.toContain('DatesAsString');
+    expect(await sdkOf(petstore(), { dates: 'Date' })).not.toContain('DatesAsString');
+  });
+
+  it('avoids a schema named DatesAsString', async () => {
+    const ir = errorDatesIR();
+    ir.schemas.set('DatesAsString', str);
+    const sdk = await sdkOf(ir, { dates: 'Date' });
+    expect(sdk).toContain('  404: DatesAsString2<Problem>;');
+    expect(sdk).toContain('export type DatesAsString2<T> = T extends Date');
+  });
+});
+
+describe('typescript plugin: unknown schema names', () => {
+  it('warns and renders unknown instead of throwing', async () => {
+    const ir: IRDocument = {
+      info: { title: 'Ghosts', version: '1.0.0' },
+      servers: [],
+      securitySchemes: new Map(),
+      schemas: new Map<string, IRSchema>([['Holder', obj([prop('ghost', ref('Ghost'), true)])]]),
+      operations: [operation('GET /ghost', 'getGhost', { responses: [response(200, [json(ref('Ghost'))])] })],
+    };
+    const { files, diagnostics } = await generate(ir);
+    expect(file(files, 'sdk.gen.ts')).toContain('export type GetGhostResponses = {\n  200: unknown;\n};');
+    expect(file(files, 'types.gen.ts')).toContain('  ghost: unknown;');
+    const warns = diagnostics.entries.filter((d) => d.code === 'unknown-schema');
+    expect(warns.length).toBeGreaterThan(0);
+    expect(warns.every((d) => d.level === 'warn' && d.message.includes('"Ghost"'))).toBe(true);
+  });
+});

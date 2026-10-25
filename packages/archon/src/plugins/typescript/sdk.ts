@@ -39,6 +39,11 @@ export type SdkModel = {
   operations: OperationModel[];
   /** transformers.gen.ts に追加で生成する、操作のレスポンス用の変換関数。 */
   extraTransformers: ExtraTransformer[];
+  /**
+   * `dates: 'Date'` のとき、エラー型用のヘルパー型 `DatesAsString<T>` の名前と、date を含む named schema。
+   * ランタイムはエラー body を変換しないので、エラー型の date / date-time は常に string にする。
+   */
+  errorDates?: { helper: string; named: ReadonlySet<string> };
 };
 
 /**
@@ -110,7 +115,8 @@ export function buildSdkModel(
       model.transform = name;
     }
   }
-  return { operations, extraTransformers };
+  const errorDates = plan ? { helper: namer.claim('DatesAsString'), named: new Set(plan.named.keys()) } : undefined;
+  return { operations, extraTransformers, ...(errorDates && { errorDates }) };
 }
 
 function selectOperations(ops: IROperation[], opts: TypeScriptPluginOptions): IROperation[] {
@@ -149,7 +155,10 @@ export function renderSdk(
 ): string {
   const opts = ctx.options;
   const ext = opts.importExtension;
-  const typeOf = (schema: IRSchema, path: string[]) => schemaToTs(schema, names, opts, path);
+  const typeOf = (schema: IRSchema, path: string[]) => schemaToTs(schema, names, opts, path, ctx.diagnostics);
+  const errorTypeOf = errorTypeRenderer(model, (schema, path) =>
+    schemaToTs(schema, names, { ...opts, dates: 'string' }, path, ctx.diagnostics),
+  );
   const ops = model.operations;
 
   const w = ctx.writer();
@@ -171,10 +180,14 @@ export function renderSdk(
     w.line('baseUrl?: string;');
   }, '};');
 
+  if (model.errorDates && ops.some((m) => m.op.responses.some((r) => !isSuccess(r.status) && errorTypeOf.wraps(r)))) {
+    renderDatesAsString(w, model.errorDates.helper);
+  }
+
   for (const m of ops) {
     renderData(w, m, typeOf);
     renderStatusTypes(w, m, typeOf, true);
-    renderStatusTypes(w, m, typeOf, false);
+    renderStatusTypes(w, m, errorTypeOf, false);
     renderSpec(w, m);
     if (opts.sdk.style === 'functions') {
       w.blank();
@@ -204,6 +217,39 @@ export function renderSdk(
 }
 
 type TypeOf = (schema: IRSchema, path: string[]) => string;
+
+/**
+ * エラーレスポンスの型。inline の date / date-time は `dates` に関係なく string で出力し、date を（推移的に）含む
+ * named schema（成功レスポンスと共有され `Date` で出力される）を参照するときは型全体を `DatesAsString<…>` で包む。
+ */
+function errorTypeRenderer(model: SdkModel, stringDates: TypeOf): TypeOf & { wraps(r: IRResponse): boolean } {
+  const errorDates = model.errorDates;
+  const needsWrap = (schema: IRSchema) =>
+    errorDates !== undefined && [...collectRefs(schema)].some((name) => errorDates.named.has(name));
+  const typeOf = (schema: IRSchema, path: string[]) => {
+    const type = stringDates(schema, path);
+    return errorDates !== undefined && needsWrap(schema) ? `${errorDates.helper}<${type}>` : type;
+  };
+  return Object.assign(typeOf, {
+    wraps: (r: IRResponse) => {
+      const c = r.contents[0];
+      return c !== undefined && needsWrap(c.schema);
+    },
+  });
+}
+
+/** `Date` を string に置き換える型（Blob はそのまま、配列 / タプル / object は再帰的に）。 */
+function renderDatesAsString(w: CodeWriter, name: string): void {
+  w.blank();
+  w.comment(['Error bodies are not transformed, so `Date` members of shared schemas stay JSON strings.'], 'jsdoc');
+  w.line(`export type ${name}<T> = T extends Date`);
+  w.line('  ? string');
+  w.line('  : T extends Blob');
+  w.line('    ? T');
+  w.line('    : T extends object');
+  w.line(`      ? { [K in keyof T]: ${name}<T[K]> }`);
+  w.line('      : T;');
+}
 
 function renderFunction(w: CodeWriter, head: string, m: OperationModel): void {
   const n = m.names;

@@ -1,4 +1,4 @@
-import { ArchonError } from '../../diagnostics.js';
+import type { Diagnostics } from '../../diagnostics.js';
 import type { IRDocument, IRSchema } from '../../ir/types.js';
 import type { SchemaPath } from '../../ir/walk.js';
 import type { PluginContext } from '../../plugin/types.js';
@@ -46,7 +46,7 @@ export function renderTypes(ctx: PluginContext<TypeScriptPluginOptions>, names: 
   const w = ctx.writer();
   w.comment(ctx.headerLines('typescript'), 'line');
   for (const [schemaName, schema] of ctx.ir.schemas) {
-    const name = typeName(names, schemaName);
+    const name = names.get(schemaName) ?? sanitizeIdentifier(schemaName);
     w.blank();
     w.comment(docLines(schema), 'jsdoc');
     if (schema.kind === 'enum' && opts.enums === 'const') {
@@ -60,7 +60,7 @@ export function renderTypes(ctx: PluginContext<TypeScriptPluginOptions>, names: 
       });
     } else {
       // enums==='enum' でも nullable な enum は TS の enum で表せないため、リテラル union にする
-      w.line(`export type ${name} = ${schemaToTs(schema, names, opts, ['schemas', schemaName])};`);
+      w.line(`export type ${name} = ${schemaToTs(schema, names, opts, ['schemas', schemaName], ctx.diagnostics)};`);
     }
   }
   return w.toString();
@@ -70,10 +70,19 @@ export function renderTypes(ctx: PluginContext<TypeScriptPluginOptions>, names: 
  * schema を TS の型式に変換する。object は複数行（2 スペースインデント）になる。
  * 優先順位: `hooks.typeOverride`（結果をそのまま使い、nullable は付けない）→
  * `typeMappings['kind:format']`（nullable なら `| null` を付ける）→ 既定の対応。
+ * 型名表に無い schema への ref は `unknown` にし、`diagnostics` があれば `unknown-schema` を warn する。
  */
-export function schemaToTs(schema: IRSchema, names: TypeNameTable, opts: TypeScriptPluginOptions, path: SchemaPath): string {
-  return render(schema, names, opts, path).text;
+export function schemaToTs(
+  schema: IRSchema,
+  names: TypeNameTable,
+  opts: TypeScriptPluginOptions,
+  path: SchemaPath,
+  diagnostics?: Diagnostics,
+): string {
+  return render(schema, { names, opts, diagnostics }, path).text;
 }
+
+type RenderContext = { names: TypeNameTable; opts: TypeScriptPluginOptions; diagnostics: Diagnostics | undefined };
 
 /** 型式の結合の強さ。配列要素などでは `Prec.Primary` 未満を括弧で囲む。 */
 const enum Prec {
@@ -87,19 +96,21 @@ type Rendered = { text: string; prec: Prec };
 const SIMPLE_TYPE = /^[A-Za-z_$][A-Za-z0-9_$.]*(\[\])*$/;
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
-function render(schema: IRSchema, names: TypeNameTable, opts: TypeScriptPluginOptions, path: SchemaPath): Rendered {
+function render(schema: IRSchema, rc: RenderContext, path: SchemaPath): Rendered {
+  const { opts } = rc;
   const override = opts.hooks.typeOverride?.(schema, { path });
   if (override !== undefined) return opaque(override);
 
   const format = 'format' in schema ? schema.format : undefined;
   const mapped = format === undefined ? undefined : opts.typeMappings[`${schema.kind}:${format}`];
-  const base = mapped !== undefined ? opaque(mapped) : renderBase(schema, names, opts, path);
+  const base = mapped !== undefined ? opaque(mapped) : renderBase(schema, rc, path);
   if (!schema.nullable || base.text === 'null' || base.text === 'unknown') return base;
   return { text: `${base.text} | null`, prec: Prec.Union };
 }
 
-function renderBase(schema: IRSchema, names: TypeNameTable, opts: TypeScriptPluginOptions, path: SchemaPath): Rendered {
-  const child = (s: IRSchema, ...segments: string[]) => render(s, names, opts, [...path, ...segments]);
+function renderBase(schema: IRSchema, rc: RenderContext, path: SchemaPath): Rendered {
+  const { opts } = rc;
+  const child = (s: IRSchema, ...segments: string[]) => render(s, rc, [...path, ...segments]);
   switch (schema.kind) {
     case 'string':
       return primary(opts.dates === 'Date' && (schema.format === 'date-time' || schema.format === 'date') ? 'Date' : 'string');
@@ -115,7 +126,7 @@ function renderBase(schema: IRSchema, names: TypeNameTable, opts: TypeScriptPlug
     case 'unknown':
       return primary('unknown');
     case 'ref':
-      return primary(typeName(names, schema.name));
+      return primary(typeName(rc, schema.name, path));
     case 'const':
       return primary(isLiteral(schema.value) ? literal(schema.value) : 'unknown');
     case 'enum':
@@ -183,10 +194,14 @@ function opaque(text: string): Rendered {
   return { text, prec: SIMPLE_TYPE.test(text) ? Prec.Primary : Prec.Union };
 }
 
-function typeName(names: TypeNameTable, schemaName: string): string {
-  const name = names.get(schemaName);
-  if (name === undefined) throw new ArchonError('unknown-schema', `Schema "${schemaName}" is not in the type name table.`);
-  return name;
+function typeName(rc: RenderContext, schemaName: string, path: SchemaPath): string {
+  const name = rc.names.get(schemaName);
+  if (name !== undefined) return name;
+  rc.diagnostics?.warn(
+    'unknown-schema',
+    `Schema "${schemaName}" referenced at ${path.join('/')} is not a named schema of the document; typed as unknown`,
+  );
+  return 'unknown';
 }
 
 /** object リテラル / 型のキー。識別子として不正なら引用する。 */
