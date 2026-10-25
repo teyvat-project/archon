@@ -9,6 +9,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpMethod
 import io.ktor.utils.io.ByteReadChannel
 import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
@@ -32,6 +33,9 @@ class TransportTest {
         request.setQueryParameter("api_key", "k")
         next(request)
     }
+
+    @AfterEach
+    fun closeCores() = TestApi.closeCores()
 
     private fun redirect(status: Int, location: String) = TestResponse(status, "", mapOf("Location" to location))
 

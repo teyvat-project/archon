@@ -12,6 +12,7 @@ import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.nullable
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.JsonObject
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertContains
 import kotlin.test.assertContentEquals
@@ -22,6 +23,9 @@ import kotlin.test.assertTrue
 
 class BodyTest {
     private fun bytesOf(body: ApiBody): ByteArray = (body.content() as OutgoingContent.ByteArrayContent).bytes()
+
+    @AfterEach
+    fun closeCores() = TestApi.closeCores()
 
     @Test
     fun encodesJsonWithExactContentType() = runBlocking<Unit> {
@@ -46,9 +50,14 @@ class BodyTest {
             assertEquals("application/octet-stream", server.last.header("content-type"))
             assertEquals("9", server.last.header("content-length"))
 
-            // The file's own type wins over the operation's media type.
+            // The operation's media type wins; the file's own type is the fallback when there is none.
             core.send(binary, RequestValues().binaryBody(ApiFile(byteArrayOf(1), contentType = "image/png")), ResponseDecoder.text, ErrorDecoders.None, null)
+            assertEquals("application/octet-stream", server.last.header("content-type"))
+            val untyped = op("/b", HttpMethod.Post, body = BodyKind.Binary, responses = text)
+            core.send(untyped, RequestValues().binaryBody(ApiFile(byteArrayOf(1), contentType = "image/png")), ResponseDecoder.text, ErrorDecoders.None, null)
             assertEquals("image/png", server.last.header("content-type"))
+            core.send(untyped, RequestValues().binaryBody(ApiFile(byteArrayOf(1))), ResponseDecoder.text, ErrorDecoders.None, null)
+            assertEquals("application/octet-stream", server.last.header("content-type"))
         }
     }
 

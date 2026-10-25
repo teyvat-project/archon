@@ -6,6 +6,7 @@ import io.ktor.client.engine.cio.CIO
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.http.HttpMethod
 import kotlinx.serialization.Serializable
+import java.util.concurrent.ConcurrentLinkedQueue
 
 @Serializable
 data class TestPet(val name: String, val count: Int? = null)
@@ -25,6 +26,13 @@ class TestOptions : ClientOptions() {
 object TestApi {
     val noSchemes: Map<String, SecuritySchemeSpec> = emptyMap()
 
+    private val cores = ConcurrentLinkedQueue<ApiClientCore>()
+
+    /** Closes every core [core] created (and so the HTTP clients they made); call from `@AfterEach`. */
+    fun closeCores() {
+        while (true) cores.poll()?.close() ?: break
+    }
+
     /** The engines every engine-dependent test runs on. */
     @JvmStatic
     fun engines(): List<String> = listOf("CIO", "OkHttp", "Android")
@@ -43,7 +51,7 @@ object TestApi {
     ): ApiClientCore {
         val options = TestOptions().apply { this.baseUrl = baseUrl }
         options.configure()
-        return ApiClientCore(options, schemes)
+        return ApiClientCore(options, schemes).also { cores.add(it) }
     }
 
     fun op(

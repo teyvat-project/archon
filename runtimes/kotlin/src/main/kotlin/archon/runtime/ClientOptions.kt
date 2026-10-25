@@ -17,7 +17,7 @@ public open class ClientOptions {
     /** Headers sent with every request. */
     public val headers: MutableMap<String, String> = linkedMapOf()
 
-    /** Time allowed for the whole exchange (redirects and reading the response included). `null` waits indefinitely. */
+    /** Time allowed until the final response headers arrive (redirects included; reading the body is not timed). `null` waits indefinitely. */
     public var timeout: Duration? = null
 
     /** Middleware, outermost first. Prefer `client.use(...)` once requests are in flight. */

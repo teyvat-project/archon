@@ -2,7 +2,7 @@ package archon.runtime
 
 import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
-import io.ktor.client.request.request
+import io.ktor.client.request.prepareRequest
 import io.ktor.client.request.setBody
 import io.ktor.client.request.url
 import io.ktor.client.statement.HttpResponse
@@ -16,11 +16,16 @@ import io.ktor.http.content.OutgoingContent
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ByteWriteChannel
 import io.ktor.utils.io.toByteArray
-import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
 import java.nio.channels.UnresolvedAddressException
 import kotlin.time.Duration
 
@@ -32,25 +37,48 @@ internal object Transport {
     private val redirectStatuses = setOf(301, 302, 303, 307, 308)
     private val bodyHeaders = listOf("Content-Encoding", "Content-Language", "Content-Location", "Content-Type", "Content-Length")
 
+    /** The outcome of one hop: the response to return, or a redirect to follow. */
+    private sealed interface Hop {
+        class Final(val response: ApiResponse) : Hop
+
+        class Redirect(val location: String, val toGet: Boolean) : Hop
+    }
+
     /**
      * Sends the request, following redirects by hand so credentials are dropped when the origin changes (spec §8.5).
-     * The timeout covers the whole exchange, redirects and reading the body included (Ktor buffers the body
-     * before `request` returns). The caller's own cancellation stays a [kotlinx.coroutines.CancellationException].
+     * The timeout covers everything up to the final response's headers (redirects included), not reading the body.
+     * The caller's own cancellation stays a [CancellationException].
      */
     suspend fun send(http: HttpClient, request: ApiRequest, timeout: Duration?, credentials: CredentialNames): ApiResponse {
-        if (timeout == null || !timeout.isPositive()) return exchange(http, request, credentials)
-        return try {
-            withTimeout(timeout) { exchange(http, request, credentials) }
-        } catch (e: TimeoutCancellationException) {
-            // A timeout of the caller's own (an enclosing withTimeout) cancels this coroutine too: let it through.
-            currentCoroutineContext().ensureActive()
-            throw ApiTransportException("Request timed out after ${timeout.inWholeMilliseconds}ms.", e, timedOut = true)
+        if (timeout == null || !timeout.isPositive()) return exchange(http, request, credentials) {}
+        return coroutineScope {
+            val headersArrived = CompletableDeferred<Unit>()
+            val timedOut = AtomicBoolean(false)
+            val exchange = async { exchange(http, request, credentials) { headersArrived.complete(Unit) } }
+            // A watchdog rather than withTimeout: the timer has to stop when the headers arrive, while the body is read
+            // inside the same `execute` block.
+            val watchdog = launch {
+                if (withTimeoutOrNull(timeout) { headersArrived.await() } == null) {
+                    timedOut.set(true)
+                    exchange.cancel()
+                }
+            }
+            try {
+                exchange.await()
+            } catch (e: CancellationException) {
+                if (!timedOut.get()) throw e
+                // The caller cancelled as well (or its own withTimeout fired): that wins.
+                currentCoroutineContext().ensureActive()
+                throw ApiTransportException("Request timed out after ${timeout.inWholeMilliseconds}ms.", e, timedOut = true)
+            } finally {
+                watchdog.cancel()
+            }
         }
     }
 
-    private suspend fun exchange(http: HttpClient, request: ApiRequest, credentials: CredentialNames): ApiResponse {
+    private suspend fun exchange(http: HttpClient, request: ApiRequest, credentials: CredentialNames, onHeaders: () -> Unit): ApiResponse {
         try {
-            return follow(http, request, credentials)
+            return follow(http, request, credentials, onHeaders)
         } catch (e: IOException) {
             // Engines may report a cancelled call as an I/O error; cancellation wins.
             currentCoroutineContext().ensureActive()
@@ -61,29 +89,37 @@ internal object Transport {
         }
     }
 
-    private suspend fun follow(http: HttpClient, request: ApiRequest, credentials: CredentialNames): ApiResponse {
+    private suspend fun follow(http: HttpClient, request: ApiRequest, credentials: CredentialNames, onHeaders: () -> Unit): ApiResponse {
         var method = request.method
         var url = request.url
         val headers = request.headers.copy()
         var body = request.body
         var redirects = 0
         while (true) {
-            val response = sendOnce(http, method, url, headers, body)
-            val status = response.status.value
-            val location = response.headers[HttpHeaders.Location]
-            if (status !in redirectStatuses || location == null) return toApiResponse(response, url)
-
-            // 303 (except HEAD) and 301/302 on POST switch to a bodiless GET; everything else re-sends the body.
-            val toGet = if (status == 303) method != HttpMethod.Head else status < 303 && method == HttpMethod.Post
-            if (!toGet && body != null && !body.replayable) return toApiResponse(response, url)
+            val hop = sendOnce(http, method, url, headers, body) { response ->
+                val status = response.status.value
+                val location = response.headers[HttpHeaders.Location]
+                // 303 (except HEAD) and 301/302 on POST switch to a bodiless GET; everything else re-sends the body.
+                val toGet = if (status == 303) method != HttpMethod.Head else status < 303 && method == HttpMethod.Post
+                if (status !in redirectStatuses || location == null || (!toGet && body?.replayable == false)) {
+                    onHeaders()
+                    Hop.Final(toApiResponse(response, url))
+                } else {
+                    Hop.Redirect(location, toGet)
+                }
+            }
+            val redirect = when (hop) {
+                is Hop.Final -> return hop.response
+                is Hop.Redirect -> hop
+            }
             if (redirects++ >= MAX_REDIRECTS) throw ApiTransportException("Too many redirects (more than $MAX_REDIRECTS).")
 
-            var next = ApiUrl.resolve(url, location)
+            var next = ApiUrl.resolve(url, redirect.location)
             if (ApiUrl.origin(next) != ApiUrl.origin(url)) {
                 for (name in credentials.headers + listOf("Authorization", "Cookie")) headers.remove(name)
                 next = ApiUrl.withoutQueryParameters(next, credentials.query)
             }
-            if (toGet) {
+            if (redirect.toGet) {
                 method = HttpMethod.Get
                 body = null
                 for (name in bodyHeaders) headers.remove(name)
@@ -92,8 +128,16 @@ internal object Transport {
         }
     }
 
-    private suspend fun sendOnce(http: HttpClient, method: HttpMethod, url: String, headers: ApiHeaders, body: ApiBody?): HttpResponse =
-        http.request {
+    /** Sends one hop and hands the streaming response (headers received, body not yet read) to [block]. */
+    private suspend fun <T> sendOnce(
+        http: HttpClient,
+        method: HttpMethod,
+        url: String,
+        headers: ApiHeaders,
+        body: ApiBody?,
+        block: suspend (HttpResponse) -> T,
+    ): T =
+        http.prepareRequest {
             this.method = method
             setRawUrl(url)
             for ((name, value) in headers) {
@@ -102,7 +146,7 @@ internal object Transport {
                 this.headers.append(name, value)
             }
             if (body != null) setBody(content(body, headers[HttpHeaders.ContentType]))
-        }
+        }.execute(block)
 
     /**
      * Points the builder at [url] without changing a byte of its path or query. `URLBuilder.takeFrom` keeps the

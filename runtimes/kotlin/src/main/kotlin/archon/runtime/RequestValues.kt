@@ -55,9 +55,9 @@ public class RequestValues {
         return this
     }
 
-    /** A raw body, sent with the file's content type or else the operation's media type. */
+    /** A raw body, sent with the operation's media type (the file's content type when the operation has none). */
     public fun binaryBody(file: ApiFile): RequestValues {
-        bodyFactory = { mediaType -> BytesBody(file.content, file.contentType ?: mediaType ?: "application/octet-stream") }
+        bodyFactory = { mediaType -> BytesBody(file.content, mediaType ?: file.contentType ?: "application/octet-stream") }
         return this
     }
 

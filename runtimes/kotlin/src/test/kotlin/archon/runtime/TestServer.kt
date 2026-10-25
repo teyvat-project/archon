@@ -27,7 +27,10 @@ class TestResponse(
     val status: Int,
     val body: String = "",
     val headers: Map<String, String> = emptyMap(),
+    /** Delay before the status line and headers are written. */
     val delayMillis: Long = 0,
+    /** Delay before each body byte (the headers are sent at once). */
+    val bodyByteDelayMillis: Long = 0,
 ) {
     companion object {
         fun json(status: Int, json: String, headers: Map<String, String> = emptyMap()) =
@@ -89,7 +92,16 @@ class TestServer private constructor(private val handler: (RecordedRequest) -> T
             builder.append("Content-Length: ${bytes.size}\r\nConnection: close\r\n\r\n")
             val output = client.getOutputStream()
             output.write(builder.toString().toByteArray(Charsets.US_ASCII))
-            output.write(bytes)
+            output.flush()
+            if (response.bodyByteDelayMillis > 0) {
+                for (b in bytes) {
+                    Thread.sleep(response.bodyByteDelayMillis)
+                    output.write(b.toInt())
+                    output.flush()
+                }
+            } else {
+                output.write(bytes)
+            }
             output.flush()
         } catch (_: Exception) {
             // The client went away (timeouts, cancellation): nothing to report.

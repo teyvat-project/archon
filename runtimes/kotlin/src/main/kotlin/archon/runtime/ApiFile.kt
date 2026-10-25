@@ -16,7 +16,7 @@ public class ApiFile(
     public val content: ByteArray,
     /** The multipart `filename` (`"blob"` when `null`). */
     public val fileName: String? = null,
-    /** The part's (or binary body's) Content-Type; `null` uses the operation's media type. */
+    /** The multipart part's Content-Type (`application/octet-stream` when `null`); a binary body uses it only when the operation has no media type. */
     public val contentType: String? = null,
 ) {
     /** Reads and writes the content as a base64 string (file name and type are not part of JSON). */

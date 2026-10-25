@@ -15,6 +15,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.nullable
 import kotlinx.serialization.builtins.serializer
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
@@ -30,6 +31,9 @@ import kotlin.time.Duration.Companion.seconds
 
 class ClientCoreTest {
     private val pet = ResponseDecoder.json(TestPet.serializer())
+
+    @AfterEach
+    fun closeCores() = TestApi.closeCores()
 
     @Test
     fun buildsUrlPreservingBaseUrlPath() = runBlocking<Unit> {
@@ -244,6 +248,33 @@ class ClientCoreTest {
                 val error = assertFailsWith<ApiTransportException> { slow.send(op("/x"), RequestValues(), pet, ErrorDecoders.None, null) }
                 assertTrue(error.timedOut)
             }
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("archon.runtime.TestApi#engines")
+    fun timeoutStopsOnceHeadersArrive(engine: String) = runBlocking<Unit> {
+        // Headers at once, then one body byte every 100ms: 600ms in all, three times the timeout.
+        TestServer.start { TestResponse(200, "abcdef", bodyByteDelayMillis = 100) }.use { server ->
+            TestApi.client(engine).use { http ->
+                val core = core(server.url) {
+                    httpClient = http
+                    timeout = 200.milliseconds
+                }
+                assertEquals("abcdef", core.send(op("/x", responses = TestApi.text), RequestValues(), ResponseDecoder.text, ErrorDecoders.None, null).data)
+            }
+        }
+    }
+
+    @Test
+    fun timeoutCoversRedirectHops() = runBlocking<Unit> {
+        TestServer.start {
+            if (it.target == "/start") TestResponse(302, "", mapOf("Location" to "/next"), delayMillis = 150)
+            else TestResponse(200, "ok", delayMillis = 150)
+        }.use { server ->
+            val core = core(server.url) { timeout = 200.milliseconds }
+            val error = assertFailsWith<ApiTransportException> { core.send(op("/start", responses = TestApi.text), RequestValues(), ResponseDecoder.text, ErrorDecoders.None, null) }
+            assertTrue(error.timedOut)
         }
     }
 
