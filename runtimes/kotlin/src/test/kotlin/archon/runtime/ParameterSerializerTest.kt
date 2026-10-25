@@ -110,6 +110,23 @@ class ParameterSerializerTest {
         assertEquals("n=42&f=1.5&b=true", ParameterSerializer.serializeQuery(specs, values))
     }
 
+    // JavaScript's String(number): shortest round-trip digits, no ".0", exponent form outside 1e-7 < |x| < 1e21.
+    @ParameterizedTest(name = "{0} -> {1}")
+    @MethodSource("doubleCases")
+    fun serializesDoublesLikeJavaScript(value: Double, expected: String) {
+        val spec = ParamSpec("n", ParamLocation.Query, ParamStyle.Form, true)
+        assertEquals("n=" + expected.replace("+", "%2B"), ParameterSerializer.serializeQuery(listOf(spec), RequestValues().query("n", value, Double.serializer())))
+        val header = ParamSpec("n", ParamLocation.Header, ParamStyle.Simple, false)
+        assertEquals(expected, ParameterSerializer.serializeHeader(header, JsonPrimitive(value)))
+    }
+
+    @Test
+    fun keepsIntegerLiteralsAsWritten() {
+        val spec = ParamSpec("n", ParamLocation.Query, ParamStyle.Form, true)
+        val values = RequestValues().query("n", Long.MAX_VALUE, Long.serializer())
+        assertEquals("n=9223372036854775807", ParameterSerializer.serializeQuery(listOf(spec), values))
+    }
+
     @Test
     fun serializeCookieJoinsWithSemicolonSpace() {
         val specs = listOf(
@@ -205,6 +222,25 @@ class ParameterSerializerTest {
             Arguments.of(ParamStyle.PipeDelimited, false, "array", "color=blue|black|brown"),
             Arguments.of(ParamStyle.PipeDelimited, false, "object", "color=R|100|G|200|B|150"),
             Arguments.of(ParamStyle.DeepObject, true, "object", "color[R]=100&color[G]=200&color[B]=150"),
+        )
+
+        @JvmStatic
+        fun doubleCases(): List<Arguments> = listOf(
+            Arguments.of(2.0, "2"),
+            Arguments.of(1e10, "10000000000"),
+            Arguments.of(1.5, "1.5"),
+            Arguments.of(-2.5, "-2.5"),
+            Arguments.of(1e21, "1e+21"),
+            Arguments.of(1.5e21, "1.5e+21"),
+            Arguments.of(123456789012345680000.0, "123456789012345680000"),
+            Arguments.of(1e-7, "1e-7"),
+            Arguments.of(1.5e-7, "1.5e-7"),
+            Arguments.of(0.000001, "0.000001"),
+            Arguments.of(0.1 + 0.2, "0.30000000000000004"),
+            Arguments.of(5e-324, "5e-324"),
+            Arguments.of(Double.MAX_VALUE, "1.7976931348623157e+308"),
+            Arguments.of(-0.0, "0"),
+            Arguments.of(0.0, "0"),
         )
 
         @JvmStatic

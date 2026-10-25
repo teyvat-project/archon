@@ -3,7 +3,7 @@ package archon.runtime
 /** Percent-encoding that matches JavaScript's `encodeURIComponent` and `URLSearchParams` byte for byte. */
 internal object PercentEncoding {
     private const val HEX = "0123456789ABCDEF"
-    private const val RESERVED = ":/?#[]@$&+,;="
+    private const val RESERVED = ":/?#[]@\$&+,;="
 
     /** `encodeURIComponent`: everything but `A-Z a-z 0-9 - _ . ! ~ * ' ( )` is encoded. */
     fun component(s: String): String = encode(s, spaceAsPlus = false, ::isComponentSafe)
@@ -31,7 +31,7 @@ internal object PercentEncoding {
                     appendBytes(builder, s.substring(i, i + 2).encodeToByteArray())
                     i++
                 }
-                c.isSurrogate() -> appendBytes(builder, "�".encodeToByteArray())
+                c.isSurrogate() -> appendBytes(builder, "\uFFFD".encodeToByteArray())
                 else -> appendBytes(builder, c.toString().encodeToByteArray())
             }
             i++

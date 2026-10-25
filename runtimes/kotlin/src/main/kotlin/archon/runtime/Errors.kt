@@ -15,7 +15,10 @@ public open class ApiException(
     message: String? = null,
 ) : RuntimeException(message ?: "HTTP $statusCode")
 
-/** The decoded error body as [T], or `null` when there is none or it is of another type. */
+/**
+ * The decoded error body as [T], or `null` when there is none or it is of another type.
+ * The check is erased for generic types: `bodyAs<List<String>>()` only checks for `List`.
+ */
 public inline fun <reified T> ApiException.bodyAs(): T? = body as? T
 
 /** The request could not be sent or the response could not be read (network failure, timeout). */
