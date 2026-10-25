@@ -8,9 +8,13 @@ import (
 
 // Helpers for the generated models.
 
-// CheckRequired fails when the JSON object data lacks one of the required properties, or holds null for one of
-// those that are not nullable. Values that are not objects (and null) pass, so json.Unmarshal reports them.
-func CheckRequired(data []byte, nonNull []string, nullable []string) error {
+// Ptr returns a pointer to v (for optional fields: `Note: core.Ptr("text")`).
+func Ptr[T any](v T) *T { return &v }
+
+// CheckRequired fails when the JSON object data lacks one of the required properties of the model typeName, or
+// holds null for one of those that are not nullable. Values that are not objects (and null) pass, so
+// json.Unmarshal reports them.
+func CheckRequired(data []byte, typeName string, nonNull []string, nullable []string) error {
 	if JSONType(data) != "object" {
 		return nil
 	}
@@ -21,18 +25,27 @@ func CheckRequired(data []byte, nonNull []string, nullable []string) error {
 	for _, name := range nonNull {
 		raw, ok := members[name]
 		if !ok {
-			return fmt.Errorf("missing required property %q", name)
+			return fmt.Errorf("%s: missing required property %q", typeName, name)
 		}
 		if string(raw) == "null" {
-			return fmt.Errorf("required property %q is null", name)
+			return fmt.Errorf("%s: required property %q is null", typeName, name)
 		}
 	}
 	for _, name := range nullable {
 		if _, ok := members[name]; !ok {
-			return fmt.Errorf("missing required property %q", name)
+			return fmt.Errorf("%s: missing required property %q", typeName, name)
 		}
 	}
 	return nil
+}
+
+// Try decodes data as a T, reporting whether it fits (untagged unions try their variants in order).
+func Try[T any](data []byte) (*T, bool) {
+	v := new(T)
+	if json.Unmarshal(data, v) != nil {
+		return nil, false
+	}
+	return v, true
 }
 
 // Discriminator returns the string value of property in the JSON object data ("" when it is absent or not a

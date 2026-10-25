@@ -341,3 +341,29 @@ func TestRequestOptionsAndUse(t *testing.T) {
 		t.Error("a relative base URL must fail")
 	}
 }
+
+func TestModelHelpers(t *testing.T) {
+	if err := CheckRequired([]byte(`{"a":1,"b":null}`), "T", []string{"a"}, []string{"b"}); err != nil {
+		t.Error(err)
+	}
+	for _, data := range []string{`{"b":null}`, `{"a":null,"b":1}`, `{"a":1}`} {
+		if err := CheckRequired([]byte(data), "T", []string{"a"}, []string{"b"}); err == nil || !strings.HasPrefix(err.Error(), "T: ") {
+			t.Errorf("%s: %v", data, err)
+		}
+	}
+	if err := CheckRequired([]byte(`null`), "T", []string{"a"}, nil); err != nil {
+		t.Error(err)
+	}
+	if Discriminator([]byte(` {"kind":"circle","r":1}`), "kind") != "circle" || Discriminator([]byte(`{"kind":1}`), "kind") != "" {
+		t.Error("discriminator")
+	}
+	if v, ok := Try[int]([]byte(`1`)); !ok || *v != 1 {
+		t.Error("Try int")
+	}
+	if _, ok := Try[int]([]byte(`"1"`)); ok {
+		t.Error("Try int from a string")
+	}
+	if *Ptr("x") != "x" {
+		t.Error("Ptr")
+	}
+}
