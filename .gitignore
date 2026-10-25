@@ -17,3 +17,4 @@ e2e/kotlin/generated/
 **/.build/
 **/.swiftpm/
 e2e/swift/generated/
+e2e/go/generated/

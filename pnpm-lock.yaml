@@ -30,6 +30,18 @@ importers:
         specifier: ^2.7.0
         version: 2.7.0
 
+  e2e/go:
+    devDependencies:
+      '@natsuneko-laboratory/archon':
+        specifier: workspace:*
+        version: link:../../packages/archon
+      '@natsuneko-laboratory/archon-e2e-mock-server':
+        specifier: workspace:*
+        version: link:../mock-server
+      jiti:
+        specifier: ^2.7.0
+        version: 2.7.0
+
   e2e/kotlin:
     devDependencies:
       '@natsuneko-laboratory/archon':
