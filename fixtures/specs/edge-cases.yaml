@@ -1,0 +1,988 @@
+openapi: 3.1.0
+info:
+  title: Archon Edge Cases
+  version: 1.0.0
+  description: >-
+    Covers every feature the generators support. Implemented by the mock server
+    in e2e/mock-server and exercised by the end-to-end suites.
+servers:
+  - url: 'http://localhost:{port}'
+    variables:
+      port:
+        default: '4010'
+tags:
+  - name: echo
+  - name: responses
+  - name: unions
+  - name: auth
+  - name: middleware
+  - name: errors
+  - name: nodes
+paths:
+  # ---------------------------------------------------------------------------
+  # parameter serialization
+  /echo/path/{simple}/{label}/{matrix}:
+    get:
+      operationId: echoPathStyles
+      summary: Echo path parameters in simple, label and matrix styles
+      tags:
+        - echo
+      parameters:
+        - name: simple
+          in: path
+          required: true
+          description: '`simple`, not exploded: `a,b`'
+          style: simple
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: label
+          in: path
+          required: true
+          description: '`label`, exploded: `.a.b`'
+          style: label
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+        - name: matrix
+          in: path
+          required: true
+          description: '`matrix`, exploded object: `;x=1;y=2`'
+          style: matrix
+          explode: true
+          schema:
+            type: object
+            required:
+              - x
+              - y
+            properties:
+              x:
+                type: integer
+              y:
+                type: integer
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+  /echo/query:
+    get:
+      operationId: echoQueryStyles
+      summary: Echo query parameters in every supported style
+      tags:
+        - echo
+      parameters:
+        - name: formExploded
+          in: query
+          description: '`form`, exploded: `formExploded=a&formExploded=b`'
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+        - name: formFlat
+          in: query
+          description: '`form`, not exploded: `formFlat=a,b`'
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: spaced
+          in: query
+          description: '`spaceDelimited`: `spaced=a%20b`'
+          style: spaceDelimited
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: piped
+          in: query
+          description: '`pipeDelimited`: `piped=1|2`'
+          style: pipeDelimited
+          explode: false
+          schema:
+            type: array
+            items:
+              type: integer
+        - name: filter
+          in: query
+          description: '`deepObject`: `filter[status]=active&filter[minAge]=3`'
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+              minAge:
+                type: integer
+        - name: reserved
+          in: query
+          description: Sent with `allowReserved`, so `/?:` stay unencoded.
+          allowReserved: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          deprecated: true
+          description: A plain scalar.
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+  /echo/headers:
+    get:
+      operationId: echoHeadersCookies
+      summary: Echo header and cookie parameters
+      tags:
+        - echo
+      parameters:
+        - name: X-Request-Ids
+          in: header
+          required: true
+          description: '`simple` array header: `a,b`'
+          schema:
+            type: array
+            items:
+              type: string
+        - name: X-Trace
+          in: header
+          schema:
+            type: string
+        - name: theme
+          in: cookie
+          required: true
+          schema:
+            type: string
+        - name: tags
+          in: cookie
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+
+  # ---------------------------------------------------------------------------
+  # request bodies
+  /echo/body/json:
+    post:
+      operationId: echoJson
+      summary: Echo a JSON body
+      tags:
+        - echo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JsonPayload'
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+  /echo/body/form:
+    post:
+      operationId: echoForm
+      summary: Echo a URL-encoded form body
+      tags:
+        - echo
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                count:
+                  type: integer
+                tags:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+  /echo/body/multipart:
+    post:
+      operationId: echoMultipart
+      summary: Echo a multipart body with files and fields
+      tags:
+        - echo
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - title
+                - file
+              properties:
+                title:
+                  type: string
+                file:
+                  type: string
+                  contentMediaType: application/octet-stream
+                attachments:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+  /echo/body/binary:
+    post:
+      operationId: echoBinary
+      summary: Echo a raw binary body
+      tags:
+        - echo
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+  /echo/body/text:
+    post:
+      operationId: echoText
+      summary: Echo a plain-text body
+      tags:
+        - echo
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+
+  # ---------------------------------------------------------------------------
+  # response bodies
+  /responses/text:
+    get:
+      operationId: getText
+      summary: Respond with text/plain
+      tags:
+        - responses
+      responses:
+        '200':
+          description: The text `hello, archon`.
+          content:
+            text/plain:
+              schema:
+                type: string
+  /responses/binary:
+    get:
+      operationId: getBinary
+      summary: Respond with application/octet-stream
+      tags:
+        - responses
+      responses:
+        '200':
+          description: The bytes 0x00 to 0xff (256 bytes).
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /responses/empty:
+    get:
+      operationId: getEmpty
+      summary: Respond with 204 No Content
+      tags:
+        - responses
+      responses:
+        '204':
+          description: No content.
+  /responses/empty-json:
+    get:
+      operationId: getEmptyJson
+      summary: Respond with 200 and an empty body despite declaring JSON
+      tags:
+        - responses
+      responses:
+        '200':
+          description: Declared as JSON but the body is empty.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  # ---------------------------------------------------------------------------
+  # unions, enums and dates
+  /unions/shapes:
+    get:
+      operationId: listShapes
+      summary: List shapes, including one whose kind is unknown (`hexagon`)
+      tags:
+        - unions
+      responses:
+        '200':
+          description: >-
+            `[{ kind: 'circle', radius: 1 }, { kind: 'square', side: 2 },
+            { kind: 'hexagon', side: 3 }]`
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Shape'
+  /unions/untagged:
+    get:
+      operationId: listPets
+      summary: List pets as an untagged union
+      tags:
+        - unions
+      responses:
+        '200':
+          description: >-
+            `[{ name: 'Tama', meows: true }, { name: 'Pochi', barks: true }]`
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Pet'
+  /enums:
+    get:
+      operationId: getEnumValues
+      summary: Respond with known and unknown enum values
+      tags:
+        - unions
+      responses:
+        '200':
+          description: >-
+            `{ status: 'active', priority: 2, statuses: ['pending', 'archived'],
+            color: null, level: 'unknown-level' }`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnumValues'
+  /dates:
+    get:
+      operationId: getDates
+      summary: Respond with date-time and date values, including inside nested arrays
+      tags:
+        - unions
+      responses:
+        '200':
+          description: Date values serialized as RFC 3339 strings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dates'
+
+  # ---------------------------------------------------------------------------
+  # errors
+  /errors/{status}:
+    get:
+      operationId: getError
+      summary: Respond with the requested status and its typed error body
+      tags:
+        - errors
+      parameters:
+        - name: status
+          in: path
+          required: true
+          description: '`200`, `400`, `404`, or any other status (answered with the default error).'
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                properties:
+                  ok:
+                    type: boolean
+        '400':
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '404':
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotFoundError'
+        default:
+          description: Any other error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ---------------------------------------------------------------------------
+  # authentication
+  /auth/bearer:
+    get:
+      operationId: authBearer
+      summary: 'Requires `Authorization: Bearer test-token`'
+      tags:
+        - auth
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/basic:
+    get:
+      operationId: authBasic
+      summary: Requires HTTP Basic `user` / `pass`
+      tags:
+        - auth
+      security:
+        - basicAuth: []
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/api-key-header:
+    get:
+      operationId: authApiKeyHeader
+      summary: 'Requires `X-API-Key: test-key`'
+      tags:
+        - auth
+      security:
+        - apiKeyHeader: []
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/api-key-query:
+    get:
+      operationId: authApiKeyQuery
+      summary: Requires `?api_key=test-key`
+      tags:
+        - auth
+      security:
+        - apiKeyQuery: []
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/api-key-cookie:
+    get:
+      operationId: authApiKeyCookie
+      summary: 'Requires `Cookie: session=test-key`'
+      tags:
+        - auth
+      security:
+        - apiKeyCookie: []
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/oauth2:
+    get:
+      operationId: authOAuth2
+      summary: Requires an unexpired access token issued by `/oauth/token`
+      tags:
+        - auth
+      security:
+        - oauth2:
+            - read
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/optional:
+    get:
+      operationId: authOptional
+      summary: Accepts anonymous requests as well as bearer-authenticated ones
+      tags:
+        - auth
+      security:
+        - {}
+        - bearerAuth: []
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/and:
+    get:
+      operationId: authAnd
+      summary: Requires both the bearer token and the `X-API-Key` header
+      tags:
+        - auth
+      security:
+        - bearerAuth: []
+          apiKeyHeader: []
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ---------------------------------------------------------------------------
+  # middleware and transport
+  /flaky/{key}:
+    get:
+      operationId: flaky
+      summary: Fails `fail` times with 503 per `key`, then succeeds
+      tags:
+        - middleware
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: Counter key; each key counts its attempts separately.
+          schema:
+            type: string
+        - name: fail
+          in: query
+          description: Number of 503 responses before the first 200.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Succeeded after `attempts` tries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - key
+                  - attempts
+                properties:
+                  key:
+                    type: string
+                  attempts:
+                    type: integer
+        '503':
+          description: Temporarily unavailable.
+          headers:
+            Retry-After:
+              description: Always `0`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /redirect/cross-origin:
+    get:
+      operationId: redirectCrossOrigin
+      summary: Redirects (302) to the echo endpoint on another origin
+      tags:
+        - middleware
+      security:
+        - apiKeyHeader: []
+      responses:
+        '200':
+          $ref: '#/components/responses/Echo'
+        '302':
+          description: Redirect to the secondary origin's `/echo/headers`.
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+
+  # ---------------------------------------------------------------------------
+  # composition and recursion
+  /nodes:
+    post:
+      operationId: createNode
+      summary: Echo a tree of nodes back, assigning ids
+      tags:
+        - nodes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Node'
+      responses:
+        '201':
+          description: The created tree.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Node'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+    basicAuth:
+      type: http
+      scheme: basic
+    apiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    apiKeyQuery:
+      type: apiKey
+      in: query
+      name: api_key
+    apiKeyCookie:
+      type: apiKey
+      in: cookie
+      name: session
+    oauth2:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: /oauth/token
+          scopes:
+            read: Read access
+            write: Write access
+
+  responses:
+    Echo:
+      description: What the server received.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Echo'
+    Unauthorized:
+      description: Missing or invalid credentials.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Echo:
+      type: object
+      description: The request as the server received it.
+      required:
+        - method
+        - path
+        - query
+        - headers
+        - cookies
+      properties:
+        method:
+          type: string
+        path:
+          type: string
+          description: Raw request path, without the query string.
+        query:
+          type: string
+          description: Raw query string without the leading `?` (empty when absent).
+        headers:
+          type: object
+          description: Request headers with lower-cased names.
+          additionalProperties:
+            type: string
+        cookies:
+          type: object
+          additionalProperties:
+            type: string
+        contentType:
+          type: string
+        body:
+          type: string
+          description: The body as text (multipart file parts are listed in `files` instead).
+        files:
+          type: array
+          items:
+            type: object
+            required:
+              - field
+              - name
+              - size
+            properties:
+              field:
+                type: string
+              name:
+                type: string
+              size:
+                type: integer
+
+    JsonPayload:
+      type: object
+      required:
+        - name
+        - count
+      properties:
+        name:
+          type: string
+        count:
+          type: integer
+        tags:
+          type: array
+          items:
+            type: string
+        note:
+          type:
+            - string
+            - 'null'
+        nested:
+          description: "A nullable reference (`oneOf` with `type: 'null'`)."
+          oneOf:
+            - $ref: '#/components/schemas/Nested'
+            - type: 'null'
+    Nested:
+      type: object
+      properties:
+        flag:
+          type: boolean
+
+    Shape:
+      description: A shape discriminated by `kind`.
+      oneOf:
+        - $ref: '#/components/schemas/Circle'
+        - $ref: '#/components/schemas/Square'
+      discriminator:
+        propertyName: kind
+        mapping:
+          circle: '#/components/schemas/Circle'
+          square: '#/components/schemas/Square'
+    Circle:
+      type: object
+      required:
+        - kind
+        - radius
+      properties:
+        kind:
+          const: circle
+        radius:
+          type: number
+    Square:
+      type: object
+      required:
+        - kind
+        - side
+      properties:
+        kind:
+          type: string
+          enum:
+            - square
+        side:
+          type: number
+
+    Pet:
+      description: A pet without a discriminator.
+      anyOf:
+        - $ref: '#/components/schemas/Cat'
+        - $ref: '#/components/schemas/Dog'
+    Cat:
+      type: object
+      required:
+        - name
+        - meows
+      properties:
+        name:
+          type: string
+        meows:
+          type: boolean
+    Dog:
+      type: object
+      required:
+        - name
+        - barks
+      properties:
+        name:
+          type: string
+        barks:
+          type: boolean
+
+    Status:
+      type: string
+      enum:
+        - active
+        - inactive
+        - pending
+    Priority:
+      type: integer
+      enum:
+        - 1
+        - 2
+        - 3
+    EnumValues:
+      type: object
+      required:
+        - status
+        - priority
+        - statuses
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        priority:
+          $ref: '#/components/schemas/Priority'
+        statuses:
+          type: array
+          items:
+            $ref: '#/components/schemas/Status'
+        color:
+          description: An inline nullable enum.
+          type:
+            - string
+            - 'null'
+          enum:
+            - red
+            - green
+            - null
+        level:
+          type: string
+          enum:
+            - low
+            - high
+
+    Dates:
+      type: object
+      required:
+        - createdAt
+        - birthday
+        - history
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        birthday:
+          type: string
+          format: date
+        updatedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        timestamps:
+          type: array
+          items:
+            type: string
+            format: date-time
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryEntry'
+        byKey:
+          type: object
+          additionalProperties:
+            type: string
+            format: date-time
+    HistoryEntry:
+      type: object
+      required:
+        - at
+        - days
+      properties:
+        at:
+          type: string
+          format: date-time
+        days:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+              format: date
+
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+    ValidationError:
+      type: object
+      required:
+        - message
+        - fields
+      properties:
+        message:
+          type: string
+        fields:
+          type: array
+          items:
+            type: object
+            required:
+              - name
+              - reason
+            properties:
+              name:
+                type: string
+              reason:
+                type: string
+    NotFoundError:
+      type: object
+      required:
+        - message
+        - resource
+      properties:
+        message:
+          type: string
+        resource:
+          type: string
+
+    NodeBase:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+    Node:
+      description: A tree node. `id` is assigned by the server.
+      allOf:
+        - $ref: '#/components/schemas/NodeBase'
+        - type: object
+          required:
+            - id
+            - children
+          properties:
+            id:
+              type: string
+              readOnly: true
+            children:
+              type: array
+              items:
+                $ref: '#/components/schemas/Node'
+            parentId:
+              description: The parent node's id, `null` for the root.
+              type:
+                - string
+                - 'null'
+              readOnly: true
