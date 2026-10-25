@@ -30,7 +30,7 @@ archon generate --strict            # 警告が 1 件でもあれば何も書き
 archon generate --verbose           # info レベルの診断（命名衝突の改名など）も表示する
 ```
 
-ワークスペース内では、`examples/natsuneko` のように `archon` を devDependency に持つパッケージから `pnpm exec archon generate` で実行できます。
+ワークスペース内では（先に `pnpm -F archon build` が必要）、`examples/natsuneko` のように `archon` を devDependency に持つパッケージから `pnpm exec archon generate` で実行できます。
 
 ```sh
 cd examples/natsuneko && pnpm exec archon generate   # → examples/natsuneko/sdk/ts/
@@ -179,14 +179,15 @@ body がストリームでリプレイ不可（`req.replayable === false`）の�
 
 ### 結果とエラー
 
-既定では例外を投げず `{ data, error, response }` を返します（`throwOnError: true` で例外）。
+非 2xx 応答だけが `ApiError` として `{ data: undefined, error, response }` の `error` に入って返ります（`throwOnError: true` ならこれも例外になります）。
+それ以外の `TransportError` / `AuthError` / デシリアライズ失敗（2xx 本文の `DecodeError`）は `throwOnError` に関係なく常に例外です。
 
 | クラス | 内容 |
 |---|---|
-| `ApiError` | 非 2xx。`status` / `body`（型付きエラーボディ）/ `response` |
-| `TransportError` | 通信失敗・タイムアウト・キャンセル。`timedOut` / `cause` |
-| `DecodeError` | 応答のデシリアライズ失敗。`raw`（生 body）/ `response` |
-| `AuthError` | 必須認証が未設定。`schemes` |
+| `ApiError` | 非 2xx（`throwOnError` 時のみ throw、既定は `error` で返る）。`status` / `body`（型付きエラーボディ）/ `response` |
+| `TransportError`（常に throw） | 通信失敗・タイムアウト・キャンセル。`timedOut` / `cause` |
+| `DecodeError`（2xx 本文では常に throw） | 応答のデシリアライズ失敗。`raw`（生 body）/ `response` |
+| `AuthError`（常に throw） | 必須認証が未設定。`schemes` |
 
 ### 対応ランタイム
 
@@ -251,14 +252,15 @@ pnpm build       # 全パッケージのビルド
 
 ### ライブスモーク（手動）
 
-`api.natsuneko.com` に対し、認証不要・必須パラメータ無しの GET を 3 件、生成 SDK で実際に呼びます（要ネットワーク）。
+`api.natsuneko.com` に対し、認証不要または任意認証（`{}` を含む）で必須パラメータ無しの GET を最大 3 件、生成 SDK で実際に呼びます（要ネットワーク）。
 `examples/natsuneko/archon.config.ts` で一時ディレクトリに SDK を生成し、HTTP 200 と `data` が `undefined` でないことを確認して、1 件でも失敗すれば非ゼロで終了します。
 
 ```sh
 node --experimental-strip-types scripts/live-smoke.ts
 ```
 
-spec 上 `security: []` の GET で必須パラメータが無いものは現状 2 件（`/catalyst/v1/announcements`、`/feature-flags/v1/me`）しか無いため、3 件目には任意認証（`{}` を含む）の `/catalyst/v1.1/timeline/newcomers` を使います。なお `GET /feature-flags/v1/me` は spec が認証不要としているにもかかわらず実 API が 401 を返すため、このスモークは失敗します（spec と実 API の不一致を検出している状態です）。
+`security: []` の操作を優先し、足りなければ任意認証の操作で埋めます。spec の宣言と実 API の挙動が食い違う操作は `scripts/live-smoke.ts` の `KNOWN_SPEC_MISMATCHES`（理由付きのスキップリスト）に載せて除外し、実行時に `skip` と表示します（現在は `GET /feature-flags/v1/me`: spec は認証不要だが実 API は 401）。
+natsuneko の spec で条件を満たす操作は現状 2 件（`/catalyst/v1/announcements`、任意認証の `/catalyst/v1.1/timeline/newcomers`）のみのため、2 件以上あれば成功とし、3 件未満のときはその旨を表示します。
 
 Archon のソースは `.js` 付きの相対 import を使っており Node の型除去だけでは読み込めないため、スクリプトは jiti 経由でソースと生成 SDK を読み込みます（事前の `pnpm build` は不要）。
 

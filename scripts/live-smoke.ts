@@ -16,7 +16,20 @@ import { fileURLToPath } from 'node:url';
 import type { IROperation, UserConfig } from '../packages/archon/src/index.ts';
 
 const repoPath = (p: string) => fileURLToPath(new URL(`../${p}`, import.meta.url));
+// Call up to COUNT operations. The natsuneko spec currently has only MIN_COUNT usable ones (one declares
+// `security: []` and works, one has optional auth; the other no-auth GETs either need parameters or are in
+// KNOWN_SPEC_MISMATCHES), so fewer than COUNT is tolerated down to MIN_COUNT, with a notice.
 const COUNT = 3;
+const MIN_COUNT = 2;
+
+/**
+ * Operations whose live behavior contradicts the spec, keyed by operation id. They are skipped (and
+ * reported) instead of failing the smoke, so a red run always means a regression in the generator or SDK.
+ * Remove an entry once the upstream spec or API is fixed.
+ */
+const KNOWN_SPEC_MISMATCHES: Record<string, string> = {
+  'GET /feature-flags/v1/me': 'spec declares no security, live API returns 401',
+};
 
 // jiti is a dependency of packages/archon, not of the workspace root.
 const { createJiti } = createRequire(repoPath('packages/archon/package.json'))('jiti') as typeof import('jiti');
@@ -58,10 +71,13 @@ try {
     op.responses.some((r) => r.status === 200);
   const noAuth = (op: IROperation) => op.security.length === 0;
   const optionalAuth = (op: IROperation) => op.security.some((s) => s.schemes.length === 0);
-  const candidates = ir.operations.filter(callable);
+  const skipped = ir.operations.filter((op) => callable(op) && op.id in KNOWN_SPEC_MISMATCHES);
+  for (const op of skipped) console.log(`skip ${op.id}: ${KNOWN_SPEC_MISMATCHES[op.id]}`);
+  const candidates = ir.operations.filter((op) => callable(op) && !(op.id in KNOWN_SPEC_MISMATCHES));
   // `security: []` operations first; if the spec has fewer than COUNT, fall back to optional-auth ones (`{}`).
   const picked = [...candidates.filter(noAuth), ...candidates.filter((op) => !noAuth(op) && optionalAuth(op))].slice(0, COUNT);
-  if (picked.length < COUNT) throw new Error(`Only ${picked.length} suitable operations found (need ${COUNT})`);
+  if (picked.length < MIN_COUNT) throw new Error(`Only ${picked.length} suitable operations found (need at least ${MIN_COUNT})`);
+  if (picked.length < COUNT) console.log(`note: only ${picked.length} suitable operations exist (wanted ${COUNT})`);
 
   // 3. Call them through the generated SDK with the default client (baseUrl = servers[0]).
   const sdk = await jiti.import<Record<string, unknown>>(join(outDir, 'ts', 'index.ts'));
