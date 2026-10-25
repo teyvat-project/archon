@@ -26,6 +26,7 @@
 | Swift | Swift 6（Apple プラットフォーム / Linux） |
 | Rust | stable（edition 2021） |
 | Go | Go 1.22+ |
+| Ruby | Ruby 3.2+（CRuby） |
 
 ### 1.4 対象認証方式
 
@@ -60,8 +61,8 @@ packages/archon/                 # 本体
   src/passes/                    # IR 変換パス
   src/plugin/                    # プラグイン API・ホスト・依存解決
   src/writer/                    # CodeWriter・ファイル出力・postProcess
-  src/plugins/{typescript,csharp,kotlin,swift,rust,go}/
-runtimes/{typescript,csharp,kotlin,swift,rust,go}/   # 手書きランタイム（各言語の通常プロジェクト、独自テスト付き）
+  src/plugins/{typescript,csharp,kotlin,swift,rust,go,ruby}/
+runtimes/{typescript,csharp,kotlin,swift,rust,go,ruby}/   # 手書きランタイム（各言語の通常プロジェクト、独自テスト付き）
 fixtures/specs/                  # natsuneko.json, petstore.yaml, edge-cases.yaml
 e2e/                             # モックサーバ + 各言語 E2E ランナー
 docs/
@@ -348,21 +349,21 @@ OpenAPI の `style` / `explode` を完全実装する。
 
 ## 7. 言語別仕様
 
-| | TypeScript | C# | Kotlin | Swift | Rust | Go |
-|---|---|---|---|---|---|---|
-| API 形状 | `getX({ client, path, query, body })` 関数（`sdk.style: 'class'` 可） | `client.Catalyst.GetXAsync(...)` | `client.catalyst.getX(...)` suspend | `client.catalyst.getX(...)` async throws | `client.catalyst().get_x(...).await` | `client.Catalyst.GetX(ctx, params)` |
-| 結果 | `{ data, error, response }`（`throwOnError` で例外） | 戻り値 + `ApiException<T>` | 戻り値 + `ApiException` | 戻り値 + `throws ApiError` | `Result<ApiResponse<T>, Error<E>>` | `(*T, *http.Response, error)` |
-| 依存 | なし（fetch） | なし（BCL、System.Text.Json source generation で AOT 対応） | Ktor client + kotlinx.serialization | なし（Foundation） | reqwest + serde + serde_json + tokio | なし（stdlib） |
-| date-time | `string`（opt `Date`） | `DateTimeOffset` | `String`（opt `kotlinx.datetime.Instant`） | `Date` | `String`（opt `chrono`） | `time.Time` |
-| int64 | `number`（opt `bigint`） | `long` | `Long` | `Int64` | `i64` | `int64` |
-| uuid | `string` | `Guid` | `String` | `UUID` | `String`（opt `uuid`） | `string` |
-| uri | `string` | `string` | `String` | `String` | `String` | `string` |
-| nullable / optional | `p?: T \| null` | `T?` | `T? = null` | `T?` | `Option<T>` + `skip_serializing_if` | `*T` + `omitempty` |
-| union（判別あり） | union 型 | `[JsonPolymorphic]` 基底クラス | sealed class + discriminator | enum（関連値）+ Codable | `#[serde(tag = "...")]` enum | 構造体 + 自前 `UnmarshalJSON` |
-| union（判別なし） | union 型 | 自前 `JsonConverter`（順に試行） | `JsonContentPolymorphicSerializer` | 順に試行する enum | `#[serde(untagged)]` enum | 順に試行 |
-| enum | 文字列リテラル union（opt `const` / `enum`） | enum + 未知値対応 converter | enum + 未知値 | `enum` + `.unknown(String)` | enum + `Unknown(String)` | `type X string` + 定数 |
-| 予約語 | 末尾 `_` | `@` プレフィックス | バッククォート | バッククォート | `r#` | 末尾 `_` |
-| マニフェスト | `package.json` + `tsconfig.json` | `.csproj`（net10.0） | `build.gradle.kts` | `Package.swift` | `Cargo.toml` | `go.mod` |
+| | TypeScript | C# | Kotlin | Swift | Rust | Go | Ruby |
+|---|---|---|---|---|---|---|---|
+| API 形状 | `getX({ client, path, query, body })` 関数（`sdk.style: 'class'` 可） | `client.Catalyst.GetXAsync(...)` | `client.catalyst.getX(...)` suspend | `client.catalyst.getX(...)` async throws | `client.catalyst().get_x(...).await` | `client.Catalyst.GetX(ctx, params)` | `client.catalyst.get_x(id:, limit: nil)`（キーワード引数）|
+| 結果 | `{ data, error, response }`（`throwOnError` で例外） | 戻り値 + `ApiException<T>` | 戻り値 + `ApiException` | 戻り値 + `throws ApiError` | `Result<ApiResponse<T>, Error<E>>` | `(*T, *http.Response, error)` | 戻り値 + `ApiError` 系例外を raise |
+| 依存 | なし（fetch） | なし（BCL、System.Text.Json source generation で AOT 対応） | Ktor client + kotlinx.serialization | なし（Foundation） | reqwest + serde + serde_json + tokio | なし（stdlib） | なし（stdlib: `net/http` / `json` / `uri` / `time`）|
+| date-time | `string`（opt `Date`） | `DateTimeOffset` | `String`（opt `kotlinx.datetime.Instant`） | `Date` | `String`（opt `chrono`） | `time.Time` | `Time`（stdlib `time`）|
+| int64 | `number`（opt `bigint`） | `long` | `Long` | `Int64` | `i64` | `int64` | `Integer` |
+| uuid | `string` | `Guid` | `String` | `UUID` | `String`（opt `uuid`） | `string` | `String` |
+| uri | `string` | `string` | `String` | `String` | `String` | `string` | `String` |
+| nullable / optional | `p?: T \| null` | `T?` | `T? = null` | `T?` | `Option<T>` + `skip_serializing_if` | `*T` + `omitempty` | `nil` 許容（キーワード引数既定 `nil`）|
+| union（判別あり） | union 型 | `[JsonPolymorphic]` 基底クラス | sealed class + discriminator | enum（関連値）+ Codable | `#[serde(tag = "...")]` enum | 構造体 + 自前 `UnmarshalJSON` | タグで振り分ける `from_json` を持つ module + `Data` クラス群（未知タグは `Unknown`）|
+| union（判別なし） | union 型 | 自前 `JsonConverter`（順に試行） | `JsonContentPolymorphicSerializer` | 順に試行する enum | `#[serde(untagged)]` enum | 順に試行 | 順に試行する `from_json` |
+| enum | 文字列リテラル union（opt `const` / `enum`） | enum + 未知値対応 converter | enum + 未知値 | `enum` + `.unknown(String)` | enum + `Unknown(String)` | `type X string` + 定数 | 定数を持つ module。値は生の `String` のまま保持（未知値も許容）|
+| 予約語 | 末尾 `_` | `@` プレフィックス | バッククォート | バッククォート | `r#` | 末尾 `_` | 末尾 `_` |
+| マニフェスト | `package.json` + `tsconfig.json` | `.csproj`（net10.0） | `build.gradle.kts` | `Package.swift` | `Cargo.toml` | `go.mod` | `.gemspec` + RBS 型定義（`sig/`）|
 
 - TS 以外では inline object / enum を巻き上げて命名する（`{Parent}{Prop}`）。TS は既定で inline のまま出力する。
 - C#: nullable reference types 有効、`required` メンバー、`System.Text.Json` source generation、`CancellationToken` を全メソッドに付与。
@@ -370,6 +371,7 @@ OpenAPI の `style` / `explode` を完全実装する。
 - Swift: `Sendable` 準拠、`Codable`、Linux では `FoundationNetworking` を条件 import する。
 - Rust: `reqwest` は `default-features = false` + `json` / `multipart` を有効化し、TLS は feature で選択（`rustls-tls` 既定）。
 - Go: `context.Context` を第 1 引数に取る。
+- Ruby: モデルは `Data.define` による不変値オブジェクト（`from_json` / `to_h`、未知フィールドは無視）。transport は差し替え可能な callable（既定は `Net::HTTP`）、middleware は `call(request, context, next_)` に応答するオブジェクト。OAuth2 トークンマネージャの single-flight は `Mutex` で実装する。同期 API のみ（スレッドから安全に呼べること）。
 
 ## 8. 認証
 
@@ -426,7 +428,7 @@ auth: {
 
 1. **単体**（vitest）: loader、parser（3.0 / 3.1 差異）、各 pass、操作名導出、CodeWriter、parameter serializer の仕様表テスト。
 2. **スナップショット**: `fixtures/specs/*` × 各言語プラグインの生成物。
-3. **コンパイル**: 生成物に対し `tsc --noEmit` / `dotnet build` / `gradle build` / `swift build` / `cargo check` / `go vet`。ツールチェーンが無い言語はローカルでは skip し、CI では全言語を実行する。
+3. **コンパイル**: 生成物に対し `tsc --noEmit` / `dotnet build` / `gradle build` / `swift build` / `cargo check` / `go vet` / `ruby -c` + `rbs validate`。ツールチェーンが無い言語はローカルでは skip し、CI では全言語を実行する。
 4. **ランタイム E2E**: `edge-cases.yaml` を実装した Node 製モックサーバに対し、各言語の生成 SDK で同一シナリオ（全 param style、全 body 種別、union / enum 未知値、各 auth、middleware 順序 / リトライ / 401 リフレッシュ、エラー型）を実行する。
 5. **ライブスモーク**（手動）: api.natsuneko.com の認証不要 GET。
 
@@ -440,5 +442,6 @@ auth: {
 - **M4**: Swift
 - **M5**: Rust
 - **M6**: Go
+- **M7**: Ruby
 
 M2 以降は M1 完了後に、本仕様を元に言語ごとに実装計画を作成して進める。
