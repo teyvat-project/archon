@@ -21,24 +21,27 @@ export async function writeOutput(
   const { diagnostics } = opts;
   const outDir = resolve(opts.root, output.path);
 
-  if (output.clean) {
-    for (const dir of new Set(opts.outputDirs)) {
-      const target = resolveInside(outDir, dir, diagnostics, `output directory "${dir}"`);
-      if (target === outDir && contains(outDir, resolve(opts.root))) {
-        diagnostics.error(
-          'unsafe-clean',
-          `Refusing to clean "${outDir}": it contains the project root. Use a dedicated output directory.`,
-        );
-      }
-      await rm(target, { recursive: true, force: true });
-    }
+  // 何かを削除する前に、すべてのパスを検証する
+  const cleanTargets = output.clean
+    ? [...new Set(opts.outputDirs)].map((dir) => resolveInside(outDir, dir, diagnostics, `output directory "${dir}"`))
+    : [];
+  const writes = files.map((file) => ({
+    target: resolveInside(outDir, file.path, diagnostics, `output file "${file.path}"`),
+    content: file.content,
+  }));
+  if (cleanTargets.includes(outDir) && contains(outDir, resolve(opts.root))) {
+    diagnostics.error(
+      'unsafe-clean',
+      `Refusing to clean "${outDir}": it contains the project root. Use a dedicated output directory.`,
+    );
   }
 
+  for (const target of cleanTargets) await rm(target, { recursive: true, force: true });
+
   await mkdir(outDir, { recursive: true });
-  for (const file of files) {
-    const target = resolveInside(outDir, file.path, diagnostics, `output file "${file.path}"`);
+  for (const { target, content } of writes) {
     await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, file.content);
+    await writeFile(target, content);
   }
 
   for (const command of output.postProcess) {

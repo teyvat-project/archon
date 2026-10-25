@@ -106,6 +106,20 @@ describe('writeOutput', () => {
     expect(await exists(join(root, 'outside.txt'))).toBe(true);
   });
 
+  it('validates all paths before cleaning anything', async () => {
+    await mkdir(join(outPath, 'ts'), { recursive: true });
+    await writeFile(join(outPath, 'ts/keep.txt'), 'keep');
+    await expect(
+      writeOutput([{ path: 'ts/ok.txt', content: 'x' }, { path: '../evil.txt', content: 'x' }], output(), {
+        root,
+        diagnostics: new Diagnostics(),
+        outputDirs: ['ts'],
+      }),
+    ).rejects.toMatchObject({ code: 'invalid-output-path' });
+    expect(await exists(join(outPath, 'ts/keep.txt'))).toBe(true);
+    expect(await exists(join(outPath, 'ts/ok.txt'))).toBe(false);
+  });
+
   it('refuses to write files outside output.path', async () => {
     await expect(
       writeOutput([{ path: '../evil.txt', content: 'x' }], output(), {

@@ -39,7 +39,11 @@ function config(plugins: ArchonPlugin<any, any>[], extra: Partial<ResolvedConfig
 }
 
 async function run(plugins: ArchonPlugin<any, any>[], opts?: { only?: string[] }, ir: IRDocument = doc()) {
-  return runPlugins(ir, config(plugins), new Diagnostics(), opts);
+  return (await runPlugins(ir, config(plugins), new Diagnostics(), opts)).files;
+}
+
+function runDirs(plugins: ArchonPlugin<any, any>[], opts?: { only?: string[] }) {
+  return runPlugins(doc(), config(plugins), new Diagnostics(), opts).then((r) => r.outputDirs);
 }
 
 const emitter = (name: string, log?: string[], extra: Record<string, unknown> = {}) =>
@@ -231,6 +235,28 @@ describe('runPlugins', () => {
     await run([a(), dep(), b()], { only: ['a'] });
     expect(log).toEqual(['dep', 'a']);
     await expect(run([a(), dep()], { only: ['zzz'] })).rejects.toMatchObject({ code: 'plugin-unknown' });
+  });
+
+  it('reports deduplicated outputDirs including auto-added dependencies and silent plugins', async () => {
+    const base = emitter('base');
+    const top = emitter('top', [], { dependencies: ['base'], factories: { base } });
+    const silent = definePlugin<{ output?: string }, void>({ name: 'silent', defaults: {}, generate: () => {} });
+    expect(await runDirs([top(), silent()])).toEqual(['base', 'top', 'silent']);
+    expect(await runDirs([emitter('a')({ output: 'shared' }), silent({ output: 'shared' })])).toEqual(['shared']);
+    expect(await runDirs([emitter('a')({ output: 'x/' }), emitter('b')({ output: '.' })])).toEqual(['x', '.']);
+  });
+
+  it('outputDirs respects only', async () => {
+    const dep = emitter('dep');
+    const a = emitter('a', [], { dependencies: ['dep'] });
+    const b = emitter('b');
+    expect(await runDirs([a(), dep(), b()], { only: ['a'] })).toEqual(['dep', 'a']);
+  });
+
+  it('fails when a factory returns a plugin with a different name', async () => {
+    const wrong = emitter('other');
+    const top = emitter('top', [], { dependencies: ['base'], factories: { base: wrong } });
+    await expect(run([top()])).rejects.toMatchObject({ code: 'plugin-missing-dependency' });
   });
 
   it('passes inlineSchemaName hook to hoisting', async () => {
