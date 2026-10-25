@@ -11,11 +11,7 @@ const CONFIG_NAMES = ['ts', 'mts', 'mjs', 'js', 'json'].map((ext) => `archon.con
  * 呼び出し側は、読み込んだファイルのディレクトリを resolveConfig の `cwd` として渡すこと。
  */
 export async function loadConfigFile(opts: { cwd: string; file?: string }): Promise<UserConfig[]> {
-  const path = opts.file !== undefined ? resolve(opts.cwd, opts.file) : findConfig(opts.cwd);
-  if (path === undefined || !existsSync(path)) {
-    const what = opts.file !== undefined ? `Config file not found: ${resolve(opts.cwd, opts.file)}` : `No config file found in ${opts.cwd} (looked for ${CONFIG_NAMES.join(', ')})`;
-    throw new ArchonError('config-not-found', what);
-  }
+  const path = findConfigFile(opts);
 
   let loaded: unknown;
   if (path.endsWith('.json')) {
@@ -27,10 +23,22 @@ export async function loadConfigFile(opts: { cwd: string; file?: string }): Prom
   return Array.isArray(loaded) ? (loaded as UserConfig[]) : [loaded as UserConfig];
 }
 
-function findConfig(cwd: string): string | undefined {
+/**
+ * 読み込む設定ファイルの絶対パスを返す。`file` 省略時は cwd で archon.config.{ts,mts,mjs,js,json} を順に探す。
+ * 見つからなければ `config-not-found` の ArchonError。
+ */
+export function findConfigFile(opts: { cwd: string; file?: string }): string {
+  if (opts.file !== undefined) {
+    const path = resolve(opts.cwd, opts.file);
+    if (!existsSync(path)) throw new ArchonError('config-not-found', `Config file not found: ${path}`);
+    return path;
+  }
   for (const name of CONFIG_NAMES) {
-    const candidate = resolve(cwd, name);
+    const candidate = resolve(opts.cwd, name);
     if (existsSync(candidate)) return candidate;
   }
-  return undefined;
+  throw new ArchonError(
+    'config-not-found',
+    `No config file found in ${opts.cwd} (looked for ${CONFIG_NAMES.join(', ')})`,
+  );
 }

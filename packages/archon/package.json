@@ -2,6 +2,19 @@
   "name": "archon",
   "version": "0.1.0",
   "type": "module",
+  "bin": {
+    "archon": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./plugins": {
+      "types": "./dist/plugins.d.ts",
+      "import": "./dist/plugins.js"
+    }
+  },
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
