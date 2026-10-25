@@ -171,7 +171,7 @@ function renderClass(
       if (p.schema.deprecated) w.line(DEPRECATED);
       w.line(`@SerialName(${literal(p.name)})`);
       if (tagDefault !== undefined) w.line('@EncodeDefault');
-      w.line(`public val ${members.get(p.name)}: ${type.code}${nullable ? '?' : ''}${tagDefault !== undefined ? ` = ${tagDefault}` : fallback},`);
+      w.line(`public val ${members.get(p.name)}: ${type.decl}${nullable ? '?' : ''}${tagDefault !== undefined ? ` = ${tagDefault}` : fallback},`);
     }
   });
   const unions = c.plan.implementsOf.get(c.schemaName) ?? [];

@@ -4,13 +4,18 @@ import type { SchemaPath } from '../../ir/walk.js';
 import type { KotlinPluginOptions } from './index.js';
 import { bare, packageCode, sanitize, type KtNames } from './names.js';
 
-/** A Kotlin type, the expression of its `KSerializer`, and a name for union wrappers (`friendly` + `Value`). */
-export type KtType = { code: string; serializer: string; friendly: string };
+/**
+ * A Kotlin type, the expression of its `KSerializer`, and a name for union wrappers (`friendly` + `Value`). `decl` is
+ * the type as a model property declares it: a mapped type whose serializer is an object carries
+ * `@Serializable(with = …)` there (also inside `List<…>` / `Map<…>`), since the serialization plugin picks property
+ * serializers from the declared type.
+ */
+export type KtType = { code: string; serializer: string; friendly: string; decl: string };
 
 /** A type mapping: a Kotlin type, optionally with its serializer expression (default `<type>.serializer()`). */
 export type KtTypeMapping = string | { type: string; serializer: string };
 
-const prim = (code: string): KtType => ({ code, serializer: `${code}.serializer()`, friendly: code });
+const prim = (code: string): KtType => ({ code, serializer: `${code}.serializer()`, friendly: code, decl: code });
 
 const STRING = prim('String');
 const INT = prim('Int');
@@ -18,8 +23,8 @@ const LONG = prim('Long');
 const DOUBLE = prim('Double');
 const FLOAT = prim('Float');
 const BOOLEAN = prim('Boolean');
-const JSON_ELEMENT: KtType = { code: 'JsonElement', serializer: 'JsonElement.serializer()', friendly: 'Json' };
-const API_FILE: KtType = { code: 'ApiFile', serializer: 'ApiFile.Serializer', friendly: 'ApiFile' };
+const JSON_ELEMENT: KtType = { code: 'JsonElement', serializer: 'JsonElement.serializer()', friendly: 'Json', decl: 'JsonElement' };
+const API_FILE: KtType = { code: 'ApiFile', serializer: 'ApiFile.Serializer', friendly: 'ApiFile', decl: 'ApiFile' };
 
 /** Maps IR schemas to Kotlin types with explicit serializer expressions (no reflective serializer lookup). */
 export class KtTypeResolver {
@@ -75,7 +80,12 @@ export class KtTypeResolver {
         return schema.base === 'string' ? STRING : schema.base === 'integer' ? LONG : DOUBLE;
       case 'array': {
         const items = this.element(schema.items, [...path, 'items'], o, visiting);
-        return { code: `List<${items.code}>`, serializer: `ListSerializer(${items.serializer})`, friendly: `${items.friendly}List` };
+        return {
+          code: `List<${items.code}>`,
+          serializer: `ListSerializer(${items.serializer})`,
+          friendly: `${items.friendly}List`,
+          decl: `List<${items.decl}>`,
+        };
       }
       case 'object': {
         if (schema.properties.length > 0 || !schema.additionalProperties) return JSON_ELEMENT; // inline objects are hoisted
@@ -84,6 +94,7 @@ export class KtTypeResolver {
           code: `Map<String, ${value.code}>`,
           serializer: `MapSerializer(String.serializer(), ${value.serializer})`,
           friendly: `${value.friendly}Map`,
+          decl: `Map<String, ${value.decl}>`,
         };
       }
       case 'ref': {
@@ -95,7 +106,7 @@ export class KtTypeResolver {
         }
         if (isDeclared(target)) {
           const code = o.qualified ? `${this.modelsPackage}.${name}` : name;
-          return { code, serializer: target.kind === 'object' ? `${code}.serializer()` : `${code}.Serializer`, friendly: bare(name) };
+          return { code, serializer: target.kind === 'object' ? `${code}.serializer()` : `${code}.Serializer`, friendly: bare(name), decl: code };
         }
         if (visiting.has(schema.name)) return JSON_ELEMENT;
         return this.typeOf(target, path, o, new Set(visiting).add(schema.name));
@@ -113,7 +124,7 @@ export class KtTypeResolver {
   }
 
   nullable(type: KtType): KtType {
-    return { code: `${type.code}?`, serializer: `${type.serializer}.nullable`, friendly: type.friendly };
+    return { code: `${type.code}?`, serializer: `${type.serializer}.nullable`, friendly: type.friendly, decl: `${type.decl}?` };
   }
 
   /** `typeOf`, made nullable when the schema is. */
@@ -148,7 +159,10 @@ function constType(value: unknown): KtType {
 
 /** A user-supplied type. */
 function custom(mapping: KtTypeMapping): KtType {
-  const { type, serializer } = typeof mapping === 'string' ? { type: mapping, serializer: `${mapping}.serializer()` } : mapping;
-  const simple = type.replace(/<.*$/, '').replace(/\?$/, '').split('.').pop() ?? type;
-  return { code: type, serializer, friendly: sanitize(bare(simple)) };
+  const simple = (t: string) => sanitize(bare(t.replace(/<.*$/, '').replace(/\?$/, '').split('.').pop() ?? t));
+  if (typeof mapping === 'string') return { code: mapping, serializer: `${mapping}.serializer()`, friendly: simple(mapping), decl: mapping };
+  const { type, serializer } = mapping;
+  // Only an object (a plain, possibly qualified name) can go in `@Serializable(with = …::class)`.
+  const decl = /^[A-Za-z_][\w.]*$/.test(serializer) ? `@Serializable(with = ${serializer}::class) ${type}` : type;
+  return { code: type, serializer, friendly: simple(type), decl };
 }

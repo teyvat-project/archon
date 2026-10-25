@@ -95,6 +95,11 @@ const stress: OpenAPIDocument = {
 const cases: Case[] = [
   { name: 'stress (reserved names, keywords, cyclic and mixed unions)', spec: stress },
   { name: 'petstore', spec: 'petstore.yaml' },
+  {
+    name: 'petstore (integer mapped with an object serializer)',
+    spec: 'petstore.yaml',
+    options: { typeMappings: { integer: { type: 'Long', serializer: 'kotlinx.serialization.builtins.LongAsStringSerializer' } } },
+  },
   { name: 'edge-cases', spec: 'edge-cases.yaml' },
   { name: 'natsuneko (defaults)', spec: 'natsuneko.json' },
   {

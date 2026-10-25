@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { arr, bool, date, doc, enumOf, generate, int, model, nullable, num, obj, prop, ref, squash, str, union } from './helpers.js';
+import { arr, bool, date, dateTime, doc, enumOf, generate, int, model, nullable, num, obj, prop, ref, squash, str, union } from './helpers.js';
 
 const shapes = () =>
   doc({
@@ -190,6 +190,20 @@ describe('kotlin plugin: models', () => {
     expect(squash(old)).toContain(squash('@Deprecated("Deprecated in the API.") @SerialName("a") public val a: String? = null,'));
     expect(old).toContain('Costs $5 *&#47; now');
     expect(model(files, 'User')).toContain('@file:Suppress("DEPRECATION", "RedundantVisibilityModifier")');
+  });
+
+  it('applies a mapping serializer to model properties, nested ones included', async () => {
+    const instant = { type: 'kotlinx.datetime.Instant', serializer: 'kotlinx.datetime.serializers.InstantIso8601Serializer' };
+    const { files } = await generate(
+      doc({ Event: obj([prop('at', dateTime, true), prop('ats', arr(dateTime)), prop('id', int, true)]) }),
+      { typeMappings: { 'string:date-time': instant, integer: 'Long' } },
+    );
+    const event = model(files, 'Event');
+    const annotated = '@Serializable(with = kotlinx.datetime.serializers.InstantIso8601Serializer::class) kotlinx.datetime.Instant';
+    expect(event).toContain(`public val at: ${annotated},`);
+    expect(event).toContain(`public val ats: List<${annotated}>? = null,`);
+    // A mapping without an explicit serializer relies on the type being serializable itself.
+    expect(event).toContain('public val id: Long,');
   });
 
   it('symbols.typeOf returns generated names', async () => {

@@ -191,15 +191,15 @@ function arg(p: { name: string; type: KtType; nullable: boolean; required: boole
   return `${p.name}: ${p.type.code}${p.nullable ? '?' : ''}${p.required ? '' : ' = null'}`;
 }
 
-const TEXT: KtType = { code: 'String', serializer: 'String.serializer()', friendly: 'String' };
+const TEXT: KtType = { code: 'String', serializer: 'String.serializer()', friendly: 'String', decl: 'String' };
 
 /** The Kotlin type of a request body: the schema's type, or the runtime body for non-object form / multipart schemas. */
 function bodyType(media: IRMediaType, resolver: KtTypeResolver, path: string[]): KtType {
   if (media.kind === 'text') return TEXT;
-  if (media.kind === 'binary') return { code: 'ApiFile', serializer: 'ApiFile.Serializer', friendly: 'ApiFile' };
+  if (media.kind === 'binary') return { code: 'ApiFile', serializer: 'ApiFile.Serializer', friendly: 'ApiFile', decl: 'ApiFile' };
   if ((media.kind === 'form' || media.kind === 'multipart') && objectSchemaName(media.schema, resolver) === undefined) {
     const runtime = media.kind === 'form' ? 'FormBody' : 'MultipartBody';
-    return { code: runtime, serializer: '', friendly: runtime };
+    return { code: runtime, serializer: '', friendly: runtime, decl: runtime };
   }
   return resolver.typeOf(media.schema, path);
 }
