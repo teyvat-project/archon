@@ -11,7 +11,11 @@ import { csharp, type CSharpPluginOptions } from '../../src/plugins.js';
 import type { OpenAPIDocument } from '../../src/loader/load.js';
 
 const specs = fileURLToPath(new URL('../../../../fixtures/specs/', import.meta.url));
-const hasDotnet = spawnSync('dotnet', ['--version'], { stdio: 'ignore' }).status === 0;
+/** The generated project targets net10.0, so an older SDK alone (e.g. a CI image's default) cannot build it. */
+const hasDotnet10 = (() => {
+  const sdks = spawnSync('dotnet', ['--list-sdks'], { encoding: 'utf8' });
+  return sdks.status === 0 && sdks.stdout.split('\n').some((line) => Number(/^(\d+)\./.exec(line)?.[1]) >= 10);
+})();
 
 type Case = { name: string; spec: string | OpenAPIDocument; options?: DeepPartial<CSharpPluginOptions>; filters?: FiltersConfig };
 
@@ -69,7 +73,7 @@ function run(command: string, args: string[], cwd: string): Promise<{ code: numb
   });
 }
 
-describe.skipIf(!hasDotnet).sequential('compile: generated C# SDK builds with dotnet build -warnaserror', () => {
+describe.skipIf(!hasDotnet10).sequential('compile: generated C# SDK builds with dotnet build -warnaserror', () => {
   it.each(cases)('$name', async ({ spec, options, filters }) => {
     const dir = await mkdtemp(join(tmpdir(), 'archon-cs-compile-'));
     try {

@@ -37,6 +37,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-workspace
+      # For the `dotnet build -warnaserror` compile tests of the C# output (skipped without a .NET 10 SDK).
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
       - run: pnpm test
 
   build:
@@ -55,7 +59,11 @@ jobs:
             const paths = files.map((f) => f.path);
             const required = ["dist/cli.js", "dist/index.js", "dist/index.d.ts", "dist/plugins.js", "dist/plugins.d.ts"];
             const missing = required.filter((p) => !paths.includes(p));
-            if (!paths.some((p) => p.startsWith("runtimes/typescript/"))) missing.push("runtimes/typescript/**");
+            for (const lang of ["typescript", "csharp"]) {
+              if (!paths.some((p) => p.startsWith(`runtimes/${lang}/`))) missing.push(`runtimes/${lang}/**`);
+            }
+            const leaked = paths.filter((p) => /^runtimes\/csharp\/.*(\.csproj$|\/(bin|obj)\/)/.test(p));
+            if (leaked.length > 0) missing.push(`no build files (${leaked.join(", ")})`);
             console.log(paths.join("\n"));
             if (missing.length > 0) {
               console.error(`::error::package is missing ${missing.join(", ")}`);
@@ -110,10 +118,34 @@ jobs:
         uses: denoland/setup-deno@v2.0.5
       - run: ${{ matrix.runtime }} --version && pnpm -F @natsuneko-laboratory/archon-e2e-typescript smoke ${{ matrix.runtime }}
 
+  # ---- C# SDK ----
+
+  runtime-csharp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet test runtimes/csharp/tests/Archon.Runtime.Tests
+
+  # Generates the edge-cases SDK and runs the xUnit suite in e2e/csharp against the shared mock server.
+  e2e-csharp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-workspace
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - run: pnpm test:e2e:csharp
+
   # Single required check for branch protection; add new jobs to `needs`.
   ci-ok:
     if: always()
-    needs: [typecheck, test, build, e2e-typescript, runtime-typescript-node, runtime-typescript-smoke]
+    needs: [typecheck, test, build, e2e-typescript, runtime-typescript-node, runtime-typescript-smoke, runtime-csharp, e2e-csharp]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
