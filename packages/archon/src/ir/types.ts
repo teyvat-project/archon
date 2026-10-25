@@ -109,6 +109,7 @@ export interface IRParameter {
   in: 'path' | 'query' | 'header' | 'cookie';
   required: boolean;
   deprecated: boolean;
+  description?: string;
   schema: IRSchema;
   style: 'simple' | 'label' | 'matrix' | 'form' | 'spaceDelimited' | 'pipeDelimited' | 'deepObject';
   explode: boolean;

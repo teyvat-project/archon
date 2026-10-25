@@ -167,6 +167,7 @@ function parseParameter(raw: unknown, ctx: SchemaContext): IRParameter {
     in: location,
     required: location === 'path' || node['required'] === true,
     deprecated: node['deprecated'] === true,
+    ...(typeof node['description'] === 'string' && { description: node['description'] }),
     schema,
     style,
     explode,

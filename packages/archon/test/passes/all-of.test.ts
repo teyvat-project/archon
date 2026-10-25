@@ -246,6 +246,57 @@ describe('flattenAllOf', () => {
     expect(ir.schemas.get('Ext')?.kind).toBe('intersection');
   });
 
+  it('flattens a non-cyclic diamond that reuses the same ref in a nested allOf', () => {
+    // Child = allOf[$ref Common, {p: allOf[$ref Common]}]: Common を 2 経路で展開するが循環ではない。
+    // GrandChild を先に宣言し、未平坦化の Child を展開経由で取り込ませる。
+    const ir = doc({
+      GrandChild: allOf([ref('Child'), obj({ g: int })]),
+      Child: allOf([ref('Common'), obj({ p: allOf([ref('Common')]) })]),
+      Common: obj({ id: str }, ['id']),
+    });
+    const diagnostics = new Diagnostics();
+    flattenAllOf(ir, diagnostics);
+    for (const name of ['Child', 'GrandChild']) {
+      const schema = ir.schemas.get(name);
+      expect(schema?.kind).toBe('object');
+      const p = schema?.kind === 'object' ? schema.properties.find((x) => x.name === 'p')?.schema : undefined;
+      expect(props(p)).toEqual([['id', 'string', true]]);
+    }
+    expect(props(ir.schemas.get('GrandChild'))).toEqual([
+      ['id', 'string', true],
+      ['p', 'object', false],
+      ['g', 'integer', false],
+    ]);
+    expect(diagnostics.entries).toEqual([]);
+  });
+
+  it('flattens a sibling ref whose property re-expands another sibling ref', () => {
+    // Other.p = allOf[$ref Common] は Child の展開経路上で Common の内側ではない。
+    const ir = doc({
+      Child: allOf([ref('Common'), ref('Other')]),
+      Common: obj({ id: str }),
+      Other: obj({ p: allOf([ref('Common')]) }),
+    });
+    const diagnostics = new Diagnostics();
+    flattenAllOf(ir, diagnostics);
+    expect(props(ir.schemas.get('Child'))).toEqual([
+      ['id', 'string', false],
+      ['p', 'object', false],
+    ]);
+    expect(diagnostics.entries).toEqual([]);
+  });
+
+  it('still detects a cycle reached through a property copied from the expanded ref', () => {
+    // Common.q.r = allOf[$ref Common] は Common の内側で Common を再展開する（無限展開）。
+    const r = allOf([ref('Common')], { origin: '#/components/schemas/Common/properties/q/properties/r' });
+    const ir = doc({
+      Common: obj({ q: obj({ r }) }),
+      Child: allOf([ref('Common'), obj({ v: int })], { origin: '#/components/schemas/Child' }),
+    });
+    expect(() => flattenAllOf(ir, new Diagnostics())).not.toThrow();
+    expect(ir.schemas.get('Child')?.kind).toBe('intersection');
+  });
+
   it('reports each unflattened intersection origin only once', () => {
     const missing = allOf([ref('Nope')], { origin: '#/components/schemas/Base/properties/x' });
     const ir = doc({
