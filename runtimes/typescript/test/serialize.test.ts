@@ -90,14 +90,15 @@ describe('serializePath', () => {
   });
 
   it('emits only the prefix for empty arrays and objects', () => {
+    // `p` keeps the segment non-empty / not a dot segment (those are rejected, see below).
     const run = (style: ParamStyle, explode: boolean, value: unknown) =>
-      serializePath('{color}', [spec('path', style, explode)], { color: value });
-    expect(run('label', false, [])).toBe('.');
-    expect(run('label', true, {})).toBe('.');
-    expect(run('matrix', false, [])).toBe(';color');
-    expect(run('matrix', true, {})).toBe(';color');
-    expect(run('simple', false, [])).toBe('');
-    expect(run('simple', true, {})).toBe('');
+      serializePath('p{color}', [spec('path', style, explode)], { color: value });
+    expect(run('label', false, [])).toBe('p.');
+    expect(run('label', true, {})).toBe('p.');
+    expect(run('matrix', false, [])).toBe('p;color');
+    expect(run('matrix', true, {})).toBe('p;color');
+    expect(run('simple', false, [])).toBe('p');
+    expect(run('simple', true, {})).toBe('p');
   });
 
   it('emits matrix without "=" for an empty string', () => {
@@ -280,5 +281,51 @@ describe('serializeCookie', () => {
     ];
     expect(serializeCookie(specs, undefined)).toBeUndefined();
     expect(serializeCookie(specs, { a: null, q: 'x' })).toBeUndefined();
+  });
+});
+
+describe('path traversal protection', () => {
+  const simple: ParamSpec = { name: 'id', in: 'path', style: 'simple', explode: false };
+
+  it.each(['..', '.', ''])('rejects a simple value %j that would form a dot / empty segment', (value) => {
+    expect(() => serializePath('/x/{id}', [simple], { id: value })).toThrow(TypeError);
+    expect(() => serializePath('/x/{id}', [simple], { id: value })).toThrow(/"id"/);
+  });
+
+  it('rejects empty arrays / objects that serialize to an empty segment', () => {
+    expect(() => serializePath('/x/{id}', [simple], { id: [] })).toThrow(TypeError);
+    expect(() => serializePath('/x/{id}', [{ ...simple, explode: true }], { id: {} })).toThrow(TypeError);
+  });
+
+  it('rejects label values whose segment becomes "." or ".."', () => {
+    const label: ParamSpec = { ...simple, style: 'label' };
+    expect(() => serializePath('/x/{id}', [label], { id: '' })).toThrow(TypeError);
+    expect(() => serializePath('/x/{id}', [label], { id: '.' })).toThrow(TypeError);
+    expect(() => serializePath('/x/{id}', [label], { id: [] })).toThrow(TypeError);
+    // `...` is not a dot segment
+    expect(serializePath('/x/{id}', [label], { id: '..' })).toBe('/x/...');
+  });
+
+  it('rejects when adjacent placeholders together form a dot segment', () => {
+    const specs: ParamSpec[] = [simple, { ...simple, name: 'ext' }];
+    expect(() => serializePath('/x/{id}{ext}', specs, { id: '.', ext: '.' })).toThrow(TypeError);
+  });
+
+  it('keeps values that are only part of a segment or contain dots', () => {
+    expect(serializePath('/files/{id}.json', [simple], { id: '' })).toBe('/files/.json');
+    expect(serializePath('/x/{id}', [simple], { id: '...' })).toBe('/x/...');
+    expect(serializePath('/x/{id}', [simple], { id: '.hidden' })).toBe('/x/.hidden');
+    expect(serializePath('/x/{id}', [{ ...simple, style: 'matrix' }], { id: '..' })).toBe('/x/;id=..');
+    expect(serializePath('/x/{id}', [{ ...simple, style: 'matrix' }], { id: '' })).toBe('/x/;id');
+  });
+
+  it('ignores allowReserved for path parameters', () => {
+    const reserved: ParamSpec = { ...simple, allowReserved: true };
+    expect(serializePath('/x/{id}', [reserved], { id: '../a/b?c#d' })).toBe('/x/..%2Fa%2Fb%3Fc%23d');
+  });
+
+  it('ignores allowReserved for cookie parameters', () => {
+    const cookie: ParamSpec = { name: 'c', in: 'cookie', style: 'form', explode: true, allowReserved: true };
+    expect(serializeCookie([cookie], { c: 'a;b=c' })).toBe('c=a%3Bb%3Dc');
   });
 });

@@ -139,3 +139,32 @@ export async function send(req: ApiRequest, opts: SendOptions): Promise<Response
     linked.clear();
   }
 }
+
+/**
+ * Returns `baseUrl` when it is absolute. A relative one (e.g. `/api` from a spec whose `servers` URL is relative)
+ * is resolved against the page location where there is one (browsers); otherwise a TypeError explains the fix.
+ */
+export function resolveBaseUrl(baseUrl: string): string {
+  if (isAbsoluteUrl(baseUrl)) return baseUrl;
+  const location = (globalThis as { location?: { href?: unknown } }).location?.href;
+  if (typeof location === 'string') {
+    try {
+      return new URL(baseUrl, location).toString();
+    } catch {
+      // fall through to the error below
+    }
+  }
+  throw new TypeError(
+    `baseUrl "${baseUrl}" is not an absolute URL and there is no page location to resolve it against; ` +
+      'pass an absolute baseUrl (e.g. "https://api.example.com") to createApiClient / createClient',
+  );
+}
+
+export function isAbsoluteUrl(url: string): boolean {
+  try {
+    new URL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}

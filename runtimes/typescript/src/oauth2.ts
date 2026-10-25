@@ -1,7 +1,7 @@
 import { base64Encode } from './base64.js';
 import type { OAuth2Value } from './client.js';
 import { AuthError } from './errors.js';
-import type { FetchLike } from './transport.js';
+import { isAbsoluteUrl, resolveBaseUrl, type FetchLike } from './transport.js';
 import type { TokenSet } from './types.js';
 
 export interface OAuth2TokenManagerOptions {
@@ -9,7 +9,10 @@ export interface OAuth2TokenManagerOptions {
   config: OAuth2Value;
   /** Default token endpoint (from the spec); a `tokenUrl` inside `config` takes precedence. */
   tokenUrl?: string;
-  /** Base that a relative token URL is resolved against (the client's `baseUrl`), as `new URL(tokenUrl, baseUrl)`. */
+  /**
+   * Base that a relative token URL is resolved against (the client's `baseUrl`, itself resolved against the page
+   * location when relative). Absolute token URLs are used as-is; without a base a relative one is passed through.
+   */
   baseUrl?: string;
   /** Tokens are renewed this many milliseconds before they expire. Default 30_000. */
   leewayMs?: number;
@@ -104,13 +107,24 @@ export class OAuth2TokenManager {
     return [...new Set([...scopes, ...configured])].sort();
   }
 
+  /** An absolute URL is used as-is; a relative one is resolved against the (effective) client baseUrl. */
+  private resolveTokenUrl(url: string): string {
+    if (this.baseUrl === undefined || isAbsoluteUrl(url)) return url;
+    try {
+      return new URL(url, resolveBaseUrl(this.baseUrl)).toString();
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      throw new AuthError(`Cannot resolve the relative tokenUrl "${url}": ${reason}`, this.schemes);
+    }
+  }
+
   private async fetchToken(scopes: string[]): Promise<TokenSet> {
     const refresh = this.config.refreshToken;
     const flow = refresh ?? this.config.clientCredentials;
     if (!flow) throw new AuthError('OAuth2 scheme has neither clientCredentials nor refreshToken configured', this.schemes);
     const configuredUrl = flow.tokenUrl ?? this.specTokenUrl;
     if (!configuredUrl) throw new AuthError('No tokenUrl configured for the OAuth2 token request', this.schemes);
-    const tokenUrl = this.baseUrl === undefined ? configuredUrl : new URL(configuredUrl, this.baseUrl).toString();
+    const tokenUrl = this.resolveTokenUrl(configuredUrl);
 
     const form: [string, string][] = [];
     const headers = new Headers({ 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' });

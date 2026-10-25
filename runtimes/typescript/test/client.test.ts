@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createClient, type ClientConfig } from '../src/client.js';
 import { ApiError, TransportError } from '../src/errors.js';
 import type { FetchLike } from '../src/transport.js';
@@ -312,5 +312,62 @@ describe('createClient', () => {
       op({ transform: (data) => ({ at: new Date((data as { at: string }).at) }) }),
     );
     expect(result.data?.at).toBeInstanceOf(Date);
+  });
+
+  it('refuses path values that would escape their segment (no request is sent)', async () => {
+    const { fetch, captured } = fakeFetch(() => json({}));
+    const client = createClient({ baseUrl: 'https://x.test/v1', securitySchemes: {}, fetch });
+    const del = op({
+      method: 'DELETE',
+      path: '/repos/{owner}/{repo}',
+      params: [
+        { name: 'owner', in: 'path', style: 'simple', explode: false },
+        { name: 'repo', in: 'path', style: 'simple', explode: false },
+      ],
+    });
+    await expect(client.request(del, { path: { owner: '..', repo: '..' } })).rejects.toThrow(TypeError);
+    await expect(client.request(del, { path: { owner: '.', repo: 'r' } })).rejects.toThrow(TypeError);
+    await expect(client.request(del, { path: { owner: 'o', repo: '' } })).rejects.toThrow(TypeError);
+    expect(captured).toHaveLength(0);
+  });
+
+  it('keeps the body Content-Type when a caller passes content-type: undefined / null', async () => {
+    const { fetch, captured } = fakeFetch(() => json({}));
+    const client = createClient({ baseUrl: 'https://x.test', securitySchemes: {}, fetch });
+    const post = op({ method: 'POST', body: { kind: 'json', mediaType: 'application/json' } });
+    await client.request(post, { body: { a: 1 }, headers: { 'Content-Type': undefined } });
+    await client.request(post, { body: { a: 1 }, headers: { 'content-type': null } });
+    await client.request(post, { body: { a: 1 }, headers: { 'Content-Type': 'application/vnd.x+json' } });
+    expect(captured.map((c) => new Headers(c.init.headers).get('content-type'))).toEqual([
+      'application/json',
+      'application/json',
+      'application/vnd.x+json',
+    ]);
+  });
+
+  describe('relative baseUrl', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('resolves a relative baseUrl against globalThis.location in browsers', async () => {
+      vi.stubGlobal('location', { href: 'https://app.test/some/page?x=1' });
+      const { fetch, captured } = fakeFetch(() => json({}));
+      const client = createClient({ baseUrl: '/api', securitySchemes: {}, fetch });
+      await client.request(op({ path: '/things' }));
+      await client.request(op({ path: '/things' }), { baseUrl: '/' });
+      expect(captured.map((c) => c.url)).toEqual(['https://app.test/api/things', 'https://app.test/things']);
+    });
+
+    it('throws a TypeError asking for an absolute baseUrl when there is no location', async () => {
+      vi.stubGlobal('location', undefined);
+      const { fetch, captured } = fakeFetch(() => json({}));
+      const client = createClient({ baseUrl: '/api', securitySchemes: {}, fetch });
+      const call = client.request(op({ path: '/things' }));
+      await expect(call).rejects.toThrow(TypeError);
+      await expect(client.request(op())).rejects.toThrow(/absolute baseUrl/);
+      await expect(client.request(op())).rejects.toThrow(/"\/api"/);
+      expect(captured).toHaveLength(0);
+    });
   });
 });

@@ -81,8 +81,11 @@ export function createAuthMiddleware(getConfig: () => ClientConfig<any>): Middle
 
   function isConfigured(config: ClientConfig<any>, scheme: string): boolean {
     const spec = config.securitySchemes[scheme];
+    // Schemes the generator cannot apply (http digest, mutualTLS, ...) are left out of securitySchemes;
+    // `customAuth` is responsible for them.
+    if (spec === undefined) return config.customAuth !== undefined;
     const value = (config.auth as Record<string, AuthEntry> | undefined)?.[scheme];
-    if (spec === undefined || value === undefined) return false;
+    if (value === undefined) return false;
     return spec.type === 'oauth2' || spec.type === 'openIdConnect' ? isOAuth2Value(value) : true;
   }
 
@@ -121,7 +124,8 @@ export function createAuthMiddleware(getConfig: () => ClientConfig<any>): Middle
   ): Promise<{ manager: OAuth2TokenManager; token: string }[]> {
     const used: { manager: OAuth2TokenManager; token: string }[] = [];
     for (const { scheme, scopes } of requirement) {
-      const spec = config.securitySchemes[scheme]!;
+      const spec = config.securitySchemes[scheme];
+      if (spec === undefined) continue; // left to customAuth
       const value = (config.auth as Record<string, AuthEntry>)[scheme];
       switch (spec.type) {
         case 'http': {

@@ -3,7 +3,7 @@ import { decodeBody, encodeBody } from './body.js';
 import { ApiError, DecodeError } from './errors.js';
 import { compose } from './middleware.js';
 import { serializeCookie, serializeHeader, serializePath, serializeQuery } from './serialize.js';
-import { send, type FetchLike } from './transport.js';
+import { resolveBaseUrl, send, type FetchLike } from './transport.js';
 import type {
   ApiRequest,
   CallContext,
@@ -88,7 +88,7 @@ export function joinUrl(baseUrl: string, path: string): string {
 }
 
 function buildUrl(baseUrl: string, op: OperationSpec, options: RequestOptions): URL {
-  const url = new URL(joinUrl(baseUrl, serializePath(op.path, op.params, options.path)));
+  const url = new URL(joinUrl(resolveBaseUrl(baseUrl), serializePath(op.path, op.params, options.path)));
   const query = serializeQuery(op.params, options.query);
   if (query !== '') url.search = url.search === '' ? query : `${url.search.slice(1)}&${query}`;
   return url;
@@ -162,7 +162,9 @@ export function createClient<TAuth extends AuthConfig = AuthConfig>(initial: Cli
       const encoded = encodeBody(op.body.kind, op.body.mediaType, options.body);
       body = encoded.body;
       replayable = encoded.replayable;
-      const callerSetType = Object.keys(options.headers ?? {}).some((k) => k.toLowerCase() === 'content-type');
+      const callerSetType = Object.entries(options.headers ?? {}).some(
+        ([k, v]) => k.toLowerCase() === 'content-type' && v !== undefined && v !== null,
+      );
       if (encoded.contentType === undefined) headers.delete('content-type');
       else if (!callerSetType) headers.set('Content-Type', encoded.contentType);
     }

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthError } from '../src/errors.js';
 import { OAuth2TokenManager } from '../src/oauth2.js';
 import type { FetchLike } from '../src/transport.js';
@@ -106,6 +106,28 @@ describe('OAuth2TokenManager', () => {
 
     it('passes a relative tokenUrl through unchanged without a baseUrl', async () => {
       await expect(resolveCase('/oauth/token', undefined)).resolves.toBe('/oauth/token');
+    });
+
+    describe('with a relative baseUrl', () => {
+      afterEach(() => {
+        vi.unstubAllGlobals();
+      });
+
+      it('uses an absolute tokenUrl as-is', async () => {
+        vi.stubGlobal('location', undefined);
+        await expect(resolveCase('https://auth.test/token', '/')).resolves.toBe('https://auth.test/token');
+      });
+
+      it('resolves against globalThis.location when available', async () => {
+        vi.stubGlobal('location', { href: 'https://app.test/x/y' });
+        await expect(resolveCase('oauth/token', '/api/')).resolves.toBe('https://app.test/api/oauth/token');
+      });
+
+      it('throws AuthError when the token URL cannot be resolved', async () => {
+        vi.stubGlobal('location', undefined);
+        await expect(resolveCase('/oauth/token', '/api')).rejects.toBeInstanceOf(AuthError);
+        await expect(resolveCase('/oauth/token', '/api')).rejects.toThrow(/tokenUrl/);
+      });
     });
   });
 

@@ -65,7 +65,8 @@ function pairs(value: Record<string, unknown>, enc: (v: unknown) => string): str
 }
 
 function serializePathValue(spec: ParamSpec, value: unknown): string {
-  const enc = makeEncoder(spec.allowReserved);
+  // allowReserved only applies to query parameters; in a path it would let `/` `?` `#` escape the segment.
+  const enc = makeEncoder(false);
   const name = enc(spec.name);
   const { explode } = spec;
 
@@ -97,13 +98,27 @@ export function serializePath(
   const byName = new Map<string, ParamSpec>();
   for (const spec of specs) if (spec.in === 'path') byName.set(spec.name, spec);
 
-  return template.replace(/\{([^{}]+)\}/g, (placeholder, name: string) => {
-    const spec = byName.get(name);
-    if (!spec) return placeholder;
-    const value = values?.[name];
-    if (isNil(value)) throw new TypeError(`Missing required path parameter "${name}"`);
-    return serializePathValue(spec, value);
-  });
+  // Serialized values never contain `/`, so template segments map 1:1 onto URL path segments.
+  return template
+    .split('/')
+    .map((segment) => {
+      const used: string[] = [];
+      const out = segment.replace(/\{([^{}]+)\}/g, (placeholder, name: string) => {
+        const spec = byName.get(name);
+        if (!spec) return placeholder;
+        const value = values?.[name];
+        if (isNil(value)) throw new TypeError(`Missing required path parameter "${name}"`);
+        used.push(name);
+        return serializePathValue(spec, value);
+      });
+      // URL parsers drop `.` / `..` segments (and `..` pops the parent), so such a value would leave its segment.
+      if (used.length > 0 && (out === '' || out === '.' || out === '..')) {
+        const names = used.map((n) => `"${n}"`).join(', ');
+        throw new TypeError(`Path parameter ${names} must not serialize to an empty, "." or ".." path segment`);
+      }
+      return out;
+    })
+    .join('/');
 }
 
 function deepObjectPairs(prefix: string, value: unknown, enc: (v: unknown) => string, out: Entries): void {
@@ -118,7 +133,7 @@ function deepObjectPairs(prefix: string, value: unknown, enc: (v: unknown) => st
 
 /** Serializes one `form`-family parameter into `name=value` strings (already encoded). */
 function formPairs(spec: ParamSpec, value: unknown): string[] {
-  const enc = makeEncoder(spec.allowReserved);
+  const enc = makeEncoder(spec.in === 'query' && spec.allowReserved);
   const name = enc(spec.name);
   const { explode, style } = spec;
 

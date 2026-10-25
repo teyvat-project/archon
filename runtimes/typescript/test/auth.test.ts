@@ -245,6 +245,37 @@ describe('createAuthMiddleware', () => {
     expect(customAuth).not.toHaveBeenCalled();
   });
 
+  describe('customAuth for schemes the generator does not support (digest, mutualTLS, ...)', () => {
+    // The generated securitySchemes omit unsupported schemes, but operations still require them.
+    const digestOnly: SecurityRequirement[] = [req_('digest')];
+
+    it('treats a scheme missing from securitySchemes as configured when customAuth is set', async () => {
+      const customAuth = vi.fn((r: ApiRequest) => {
+        r.headers.set('Authorization', 'Digest username="u"');
+      });
+      const t = setup({ customAuth }, digestOnly);
+      await t.mw(makeReq(), t.next, t.ctx);
+      expect(customAuth).toHaveBeenCalledTimes(1);
+      expect(t.seen[0]!.headers.get('authorization')).toBe('Digest username="u"');
+    });
+
+    it('still applies the supported schemes of an AND requirement alongside customAuth', async () => {
+      const customAuth = vi.fn((r: ApiRequest) => {
+        r.headers.set('X-Client-Cert', 'yes');
+      });
+      const t = setup({ auth: { keyHeader: 'k' }, customAuth }, [[...req_('keyHeader'), ...req_('mtls')]]);
+      await t.mw(makeReq(), t.next, t.ctx);
+      expect(t.seen[0]!.headers.get('x-api-key')).toBe('k');
+      expect(t.seen[0]!.headers.get('x-client-cert')).toBe('yes');
+    });
+
+    it('throws AuthError for such a scheme without customAuth', async () => {
+      const t = setup({}, digestOnly);
+      await expect(t.mw(makeReq(), t.next, t.ctx)).rejects.toBeInstanceOf(AuthError);
+      expect(t.next).not.toHaveBeenCalled();
+    });
+  });
+
   describe('oauth2', () => {
     function tokenServer(tokens: string[] = []) {
       const calls: { url: string; form: URLSearchParams }[] = [];
@@ -306,6 +337,66 @@ describe('createAuthMiddleware', () => {
       );
       await t.mw(makeReq(), t.next, t.ctx);
       expect(server.calls.map((c) => c.url)).toEqual(['http://h/oauth/token', 'http://h/api/oauth/refresh']);
+    });
+
+    it('uses an absolute tokenUrl as-is even when the baseUrl is relative', async () => {
+      vi.stubGlobal('location', undefined);
+      try {
+        const server = tokenServer();
+        const t = setup(
+          {
+            baseUrl: '/',
+            securitySchemes: { cc: { type: 'oauth2', tokenUrl: 'https://auth.test/token' } },
+            auth: { cc: { clientCredentials: cc } },
+            fetch: server.fetch,
+          },
+          [req_('cc')],
+        );
+        await t.mw(makeReq(), t.next, t.ctx);
+        expect(server.calls.map((c) => c.url)).toEqual(['https://auth.test/token']);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('resolves a relative tokenUrl against a relative baseUrl via globalThis.location', async () => {
+      vi.stubGlobal('location', { href: 'https://app.test/page' });
+      try {
+        const server = tokenServer();
+        const t = setup(
+          {
+            baseUrl: '/api/',
+            securitySchemes: { cc: { type: 'oauth2', tokenUrl: 'oauth/token' } },
+            auth: { cc: { clientCredentials: cc } },
+            fetch: server.fetch,
+          },
+          [req_('cc')],
+        );
+        await t.mw(makeReq(), t.next, t.ctx);
+        expect(server.calls.map((c) => c.url)).toEqual(['https://app.test/api/oauth/token']);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('maps an unresolvable relative tokenUrl to AuthError', async () => {
+      vi.stubGlobal('location', undefined);
+      try {
+        const server = tokenServer();
+        const t = setup(
+          {
+            baseUrl: '/',
+            securitySchemes: { cc: { type: 'oauth2', tokenUrl: '/oauth/token' } },
+            auth: { cc: { clientCredentials: cc } },
+            fetch: server.fetch,
+          },
+          [req_('cc')],
+        );
+        await expect(t.mw(makeReq(), t.next, t.ctx)).rejects.toBeInstanceOf(AuthError);
+        expect(server.calls).toHaveLength(0);
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
 
     it('re-resolves the tokenUrl after the baseUrl changes', async () => {
