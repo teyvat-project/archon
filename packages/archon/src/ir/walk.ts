@@ -112,3 +112,23 @@ export function collectRefs(schema: IRSchema): Set<string> {
   });
   return refs;
 }
+
+/**
+ * named schemas と operation 配下の全 schema（parameters / requestBody / responses の headers と contents）に
+ * `mapSchema(schema, fn)` を適用し、`ir` をその場で書き換える。
+ */
+export function mapDocumentSchemas(ir: IRDocument, fn: (s: IRSchema, path: SchemaPath) => IRSchema): void {
+  const map = (schema: IRSchema, ...root: string[]) => mapSchema(schema, fn, root);
+
+  for (const [name, schema] of ir.schemas) ir.schemas.set(name, map(schema, 'schemas', name));
+  for (const op of ir.operations) {
+    const base = ['operations', op.id];
+    for (const p of op.parameters) p.schema = map(p.schema, ...base, 'parameters', p.name);
+    for (const c of op.requestBody?.contents ?? []) c.schema = map(c.schema, ...base, 'requestBody', c.mediaType);
+    for (const r of op.responses) {
+      const rbase = [...base, 'responses', String(r.status)];
+      for (const [name, schema] of r.headers) r.headers.set(name, map(schema, ...rbase, 'headers', name));
+      for (const c of r.contents) c.schema = map(c.schema, ...rbase, c.mediaType);
+    }
+  }
+}
