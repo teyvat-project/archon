@@ -108,7 +108,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
       - if: matrix.runtime == 'deno'
         uses: denoland/setup-deno@v2.0.5
-      - run: pnpm -F @natsuneko-laboratory/archon-e2e-typescript smoke ${{ matrix.runtime }}
+      - run: ${{ matrix.runtime }} --version && pnpm -F @natsuneko-laboratory/archon-e2e-typescript smoke ${{ matrix.runtime }}
 
   # Single required check for branch protection; add new jobs to `needs`.
   ci-ok:

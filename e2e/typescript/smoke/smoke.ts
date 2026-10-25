@@ -2,7 +2,9 @@
 // and Deno by scripts/runtime-smoke.mjs. Usage: <runtime> smoke/smoke.ts <mock-server-url>
 import { ApiError, createApiClient, echoJson, getBinary, getError, getText, listShapes } from '../generated/default/index.js';
 
-const baseUrl = process.argv[process.argv.length - 1]!;
+// Bun and Deno both expose Node's `process` global, but Deno's type-check may not have @types/node.
+const { argv } = (globalThis as unknown as { process: { argv: string[] } }).process;
+const baseUrl = argv[argv.length - 1]!;
 const client = createApiClient({ baseUrl });
 
 function check(condition: boolean, message: string): void {
