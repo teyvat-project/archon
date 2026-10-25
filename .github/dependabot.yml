@@ -33,3 +33,13 @@ updates:
     groups:
       gradle:
         patterns: ['*']
+
+  - package-ecosystem: cargo
+    # The generated SDK's versions live in packages/archon/src/plugins/rust/project.ts; the plugin's versions test
+    # fails until that file is bumped to match these manifests.
+    directories: ['/runtimes/rust', '/e2e/rust']
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ['*']
