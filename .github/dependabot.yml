@@ -33,3 +33,13 @@ updates:
     groups:
       gradle:
         patterns: ['*']
+
+  - package-ecosystem: gomod
+    # Both modules use the standard library only; this keeps their `go` directive in view. The generated SDK's
+    # version lives in packages/archon/src/plugins/go/project.ts (the plugin's client test checks they match).
+    directories: ['/runtimes/go', '/e2e/go']
+    schedule:
+      interval: weekly
+    groups:
+      gomod:
+        patterns: ['*']
