@@ -21,8 +21,12 @@
   ],
   "scripts": {
     "build": "node scripts/copy-runtimes.mjs && tsup",
+    "prepack": "pnpm run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p ."
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "@apidevtools/json-schema-ref-parser": "^11.9.3",
