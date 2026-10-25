@@ -47,6 +47,8 @@ export function parseOperations(doc: OpenAPIDocument, ctx: SchemaContext, hooks:
 
   const namer = new UniqueNamer();
   const rootSecurity = doc['security'];
+  const schemes: unknown = doc['components']?.['securitySchemes'];
+  const definedSchemes = new Set(isRecord(schemes) ? Object.keys(schemes) : []);
 
   for (const [path, item] of Object.entries(paths)) {
     if (!isRecord(item)) continue;
@@ -59,7 +61,18 @@ export function parseOperations(doc: OpenAPIDocument, ctx: SchemaContext, hooks:
 
       const derived = deriveOperationName(method, path);
       const operationId = node['operationId'];
-      const base = typeof operationId === 'string' && operationId.length > 0 ? toCase(operationId, 'camelCase') : derived;
+      let base = derived;
+      if (typeof operationId === 'string' && operationId.length > 0) {
+        base = toCase(operationId, 'camelCase');
+        if (base === '') {
+          base = derived;
+          ctx.diagnostics.warn(
+            'operation-name-fallback',
+            `operationId "${operationId}" of ${method.toUpperCase()} ${path} has no ASCII letters or digits; using the derived name "${derived}"`,
+            pointer,
+          );
+        }
+      }
       const tags = stringArray(node['tags']);
       const servers = node['servers'] ?? item['servers'];
       const requestBody = parseRequestBody(node['requestBody'], octx);
@@ -79,6 +92,15 @@ export function parseOperations(doc: OpenAPIDocument, ctx: SchemaContext, hooks:
         security: parseSecurityRequirements(Array.isArray(node['security']) ? node['security'] : rootSecurity),
         ...(Array.isArray(servers) && { servers: parseServers(servers) }),
       };
+
+      for (const name of new Set(op.security.flatMap((r) => r.schemes.map((x) => x.name)))) {
+        if (definedSchemes.has(name)) continue;
+        ctx.diagnostics.warn(
+          'unknown-security-scheme',
+          `${op.id} requires security scheme "${name}", which is not defined in components.securitySchemes`,
+          pointer,
+        );
+      }
 
       const hooked = hooks.operationName?.(op, { derived });
       const wanted = typeof hooked === 'string' && hooked.length > 0 ? hooked : base;
@@ -148,7 +170,8 @@ function parseParameter(raw: unknown, ctx: SchemaContext): IRParameter {
     schema,
     style,
     explode,
-    allowReserved: node['allowReserved'] === true,
+    // allowReserved is only defined for query parameters.
+    allowReserved: location === 'query' && node['allowReserved'] === true,
   };
 }
 

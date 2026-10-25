@@ -1,5 +1,7 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -30,6 +32,22 @@ describe('loadInput', () => {
     const byId = doc.paths['/pets/{id}'].get.responses['200'].content['application/json'].schema;
     expect([pets.$ref, byId.$ref].filter(Boolean)).toHaveLength(1);
     expect(doc.components.schemas.Local.properties.pet.$ref).toBe('#/components/schemas/Other');
+  });
+
+  it('strips a leading UTF-8 BOM from JSON and YAML files', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'archon-bom-'));
+    try {
+      const spec = { openapi: '3.1.0', info: { title: 'bom', version: '1' }, paths: {} };
+      await writeFile(join(dir, 'spec.json'), `\uFEFF${JSON.stringify(spec)}`);
+      await writeFile(join(dir, 'spec.yaml'), '\uFEFFopenapi: 3.1.0\ninfo:\n  title: bom\n  version: "1"\npaths: {}\n');
+      await writeFile(join(dir, 'spec.txt'), `\uFEFF${JSON.stringify(spec)}`);
+      for (const name of ['spec.json', 'spec.yaml', 'spec.txt']) {
+        const doc = await loadInput(name, { cwd: dir, diagnostics: new Diagnostics() });
+        expect(doc.info.title).toBe('bom');
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('loads JSON object input as-is', async () => {

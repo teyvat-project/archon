@@ -76,7 +76,9 @@ async function readLocal(file: string, original: string, diagnostics: Diagnostic
   }
 }
 
-function parseText(text: string, source: string, diagnostics: Diagnostics): Record<string, unknown> {
+function parseText(raw: string, source: string, diagnostics: Diagnostics): Record<string, unknown> {
+  // JSON.parse rejects a leading byte order mark; editors on Windows commonly write one.
+  const text = raw.startsWith('\uFEFF') ? raw.slice(1) : raw;
   const ext = extname(source.split(/[?#]/)[0] ?? '').toLowerCase();
   let parsed: unknown;
   try {

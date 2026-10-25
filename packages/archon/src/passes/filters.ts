@@ -1,6 +1,7 @@
-import type { Diagnostics } from '../diagnostics.js';
+import { ArchonError, type Diagnostics } from '../diagnostics.js';
 import type { IRDocument, IROperation, IRSchema } from '../ir/types.js';
-import { mapSchema } from '../ir/walk.js';
+import { mapDocumentSchemas, mapSchema, type SchemaPath } from '../ir/walk.js';
+import { escapePointer } from '../parser/schema.js';
 import { applyTemplate } from '../writer/naming.js';
 
 export type IncludeExclude = { include?: string[]; exclude?: string[] };
@@ -16,11 +17,23 @@ export type FiltersConfig = {
 
 const REGEX_PATTERN = /^\/(.+)\/([a-z]*)$/s;
 
-/** `/…/flags` 形式なら RegExp として、それ以外は完全一致で照合する。 */
+/**
+ * `/…/flags` 形式なら RegExp として、それ以外は完全一致で照合する。
+ * 正規表現として不正なら `invalid-filter-pattern` の ArchonError。
+ */
 export function matchesPattern(value: string, pattern: string): boolean {
   const m = REGEX_PATTERN.exec(pattern);
-  if (m) return new RegExp(m[1] as string, m[2]).test(value);
-  return value === pattern;
+  if (!m) return value === pattern;
+  let regex: RegExp;
+  try {
+    regex = new RegExp(m[1] as string, m[2]);
+  } catch (e) {
+    throw new ArchonError(
+      'invalid-filter-pattern',
+      `Invalid filter pattern ${pattern}: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+  return regex.test(value);
 }
 
 function matchesAny(value: string, patterns: string[]): boolean {
@@ -51,22 +64,26 @@ function compare(a: string, b: string): number {
  * `preserveOrder` が `true` でなければ operations を id、schemas を名前でソートする。
  * `filters` が未指定でもソートは行う（既定の `preserveOrder: false`）。
  *
- * schema フィルタは `ir.schemas` から名前付き schema を除去するだけで、ref は書き換えない。
- * 除去した schema を指す ref が残る場合（dangling ref）の扱いは利用者の責任。
+ * schema フィルタ / deprecated で除去した schema を指す ref（dangling ref）は、使用箇所の base meta
+ * （nullable / description など）を残した `unknown` に置き換え、discriminator.mapping からは除去した
+ * schema を指すエントリを落とす。置き換えごとに（schema 名, 位置）単位で 1 回 `filter-dangling-ref` を warn する。
  * orphan の除去は `removeOrphans` で別途行う（`filters.orphans` の判断は呼び出し側）。
  */
-export function applyFilters(ir: IRDocument, filters: FiltersConfig | undefined): void {
+export function applyFilters(ir: IRDocument, filters: FiltersConfig | undefined, diagnostics: Diagnostics): void {
   const f = filters ?? {};
 
   ir.operations = ir.operations.filter(
     (op) => passes(op.id, f.operations) && passesTags(op.tags, f.tags) && !(f.deprecated === false && op.deprecated),
   );
 
+  const removed = new Set<string>();
   for (const [name, schema] of [...ir.schemas]) {
     if (!passes(name, f.schemas) || (f.deprecated === false && schema.deprecated === true)) {
       ir.schemas.delete(name);
+      removed.add(name);
     }
   }
+  if (removed.size > 0) replaceDanglingRefs(ir, removed, diagnostics);
 
   if (f.preserveOrder !== true) {
     ir.operations.sort((a, b) => compare(a.id, b.id));
@@ -74,6 +91,45 @@ export function applyFilters(ir: IRDocument, filters: FiltersConfig | undefined)
     ir.schemas.clear();
     for (const [name, schema] of sorted) ir.schemas.set(name, schema);
   }
+}
+
+/** 除去した schema への ref を `unknown` に置き換え、discriminator.mapping から除去した schema を落とす。 */
+function replaceDanglingRefs(ir: IRDocument, removed: Set<string>, diagnostics: Diagnostics): void {
+  const operationPointers = new Map(
+    ir.operations.map((op) => [op.id, `#/paths/${escapePointer(op.path)}/${op.method}`] as const),
+  );
+  const rootPointer = (path: SchemaPath): string =>
+    path[0] === 'schemas'
+      ? `#/components/schemas/${escapePointer(path[1] ?? '')}`
+      : (operationPointers.get(path[1] ?? '') ?? '#');
+
+  const warned = new Set<string>();
+  const warn = (name: string, location: string) => {
+    const key = `${name}\0${location}`;
+    if (warned.has(key)) return;
+    warned.add(key);
+    diagnostics.warn(
+      'filter-dangling-ref',
+      `Schema "${name}" was removed by the filters but is still referenced; the reference is typed as unknown`,
+      location,
+    );
+  };
+
+  mapDocumentSchemas(ir, (s, path) => {
+    if (s.kind === 'ref' && removed.has(s.name)) {
+      warn(s.name, s.origin ?? rootPointer(path));
+      const { kind: _kind, name: _name, ...meta } = s;
+      return { ...meta, kind: 'unknown' };
+    }
+    if (s.kind === 'union' && s.discriminator) {
+      const dropped = [...s.discriminator.mapping.values()].filter((target) => removed.has(target));
+      if (dropped.length === 0) return s;
+      for (const target of dropped) warn(target, s.origin ?? rootPointer(path));
+      const mapping = new Map([...s.discriminator.mapping].filter(([, target]) => !removed.has(target)));
+      return { ...s, discriminator: { ...s.discriminator, mapping } };
+    }
+    return s;
+  });
 }
 
 /** operation 配下の全 schema（parameters / requestBody / responses の headers と contents）。 */

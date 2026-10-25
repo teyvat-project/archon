@@ -14,13 +14,32 @@ export async function loadConfigFile(opts: { cwd: string; file?: string }): Prom
   const path = findConfigFile(opts);
 
   let loaded: unknown;
-  if (path.endsWith('.json')) {
-    loaded = JSON.parse(readFileSync(path, 'utf8'));
-  } else {
-    const jiti = createJiti(import.meta.url, { interopDefault: true });
-    loaded = await jiti.import(path, { default: true });
+  try {
+    if (path.endsWith('.json')) {
+      loaded = JSON.parse(readFileSync(path, 'utf8'));
+    } else {
+      const jiti = createJiti(import.meta.url, { interopDefault: true });
+      loaded = await jiti.import(path, { default: true });
+    }
+  } catch (e) {
+    throw new ArchonError('config-invalid', `Failed to load config file ${path}: ${String(e)}`);
   }
-  return Array.isArray(loaded) ? (loaded as UserConfig[]) : [loaded as UserConfig];
+
+  const configs = Array.isArray(loaded) ? loaded : [loaded];
+  configs.forEach((config: unknown, i) => {
+    if (typeof config !== 'object' || config === null || Array.isArray(config)) {
+      throw new ArchonError('config-invalid', `Config file ${path} must export a config object (or an array of them)${where(i, loaded)}`);
+    }
+    const missing = (['input', 'output'] as const).filter((key) => (config as Record<string, unknown>)[key] === undefined);
+    if (missing.length > 0) {
+      throw new ArchonError('config-invalid', `Config file ${path} is missing ${missing.map((k) => `"${k}"`).join(' and ')}${where(i, loaded)}`);
+    }
+  });
+  return configs as UserConfig[];
+}
+
+function where(index: number, loaded: unknown): string {
+  return Array.isArray(loaded) ? ` (entry ${index})` : '';
 }
 
 /**

@@ -27,7 +27,7 @@ export function runCommonPasses(
 ): void {
   const transforms = opts.transforms ?? {};
 
-  applyFilters(ir, opts.filters);
+  applyFilters(ir, opts.filters, diagnostics);
   flattenAllOf(ir, diagnostics);
   if (transforms.inferDiscriminator !== false) inferDiscriminators(ir);
   if (transforms.enums === 'root') {

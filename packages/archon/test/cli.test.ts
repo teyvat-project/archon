@@ -90,10 +90,25 @@ describe('cli generate', () => {
   });
 
   it('prints the stack and exits 1 on unexpected exceptions', async () => {
-    await writeFile(join(dir, 'archon.config.mjs'), `throw new TypeError('boom');`);
+    await writeFile(join(dir, 'openapi.yaml'), spec);
+    await writeFile(
+      join(dir, 'archon.config.mjs'),
+      `export default { input: 'openapi.yaml', output: 'out', plugins: [{
+        name: 'boom', options: {},
+        definition: { name: 'boom', defaults: {}, generate() { throw new TypeError('boom'); } },
+      }] };`,
+    );
     expect(await runCli(argv('generate'))).toBe(1);
     expect(stderr).toContain('TypeError');
     expect(stderr).toContain('boom');
+  });
+
+  it('reports a config file that fails to load as config-invalid', async () => {
+    await writeFile(join(dir, 'archon.config.mjs'), `throw new TypeError('boom');`);
+    expect(await runCli(argv('generate'))).toBe(1);
+    expect(stderr).toContain('config-invalid');
+    expect(stderr).toContain('archon.config.mjs');
+    expect(stderr).toContain('TypeError: boom');
   });
 });
 

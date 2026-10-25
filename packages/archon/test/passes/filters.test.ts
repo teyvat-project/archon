@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Diagnostics } from '../../src/diagnostics.js';
+import { ArchonError, Diagnostics } from '../../src/diagnostics.js';
 import type { IRDocument, IROperation, IRSchema } from '../../src/ir/types.js';
 import { applyFilters, matchesPattern, removeOrphans, renameSchemas } from '../../src/passes/filters.js';
 
@@ -63,16 +63,17 @@ describe('matchesPattern', () => {
 describe('applyFilters', () => {
   it('include regex and exclude exact (exclude wins)', () => {
     const ir = doc([op('get', '/a'), op('get', '/b'), op('post', '/a'), op('get', '/c')]);
-    applyFilters(ir, {
-      operations: { include: ['/^GET /'], exclude: ['GET /b'] },
-      preserveOrder: true,
-    });
+    applyFilters(
+      ir,
+      { operations: { include: ['/^GET /'], exclude: ['GET /b'] }, preserveOrder: true },
+      new Diagnostics(),
+    );
     expect(ids(ir)).toEqual(['GET /a', 'GET /c']);
   });
 
   it('exclude wins when include also matches', () => {
     const ir = doc([op('get', '/a')]);
-    applyFilters(ir, { operations: { include: ['GET /a'], exclude: ['/a$/'] } });
+    applyFilters(ir, { operations: { include: ['GET /a'], exclude: ['/a$/'] } }, new Diagnostics());
     expect(ids(ir)).toEqual([]);
   });
 
@@ -86,23 +87,119 @@ describe('applyFilters', () => {
       ]);
 
     const include = mk();
-    applyFilters(include, { tags: { include: ['pets'] } });
+    applyFilters(include, { tags: { include: ['pets'] } }, new Diagnostics());
     expect(ids(include)).toEqual(['GET /a', 'GET /b']);
 
     const exclude = mk();
-    applyFilters(exclude, { tags: { exclude: ['/^adm/'] } });
+    applyFilters(exclude, { tags: { exclude: ['/^adm/'] } }, new Diagnostics());
     expect(ids(exclude)).toEqual(['GET /a', 'GET /c', 'GET /d']);
 
     const both = mk();
-    applyFilters(both, { tags: { include: ['pets'], exclude: ['admin'] } });
+    applyFilters(both, { tags: { include: ['pets'], exclude: ['admin'] } }, new Diagnostics());
     expect(ids(both)).toEqual(['GET /a']);
   });
 
-  it('filters named schemas without rewriting refs', () => {
-    const ir = doc([op('get', '/a', { responses: jsonResponse(ref('Gone')) })], { Keep: str, Gone: str, Tmp: str });
-    applyFilters(ir, { schemas: { include: ['/^(Keep|Gone)$/'], exclude: ['Gone'] } });
+  it('filters named schemas', () => {
+    const ir = doc([op('get', '/a')], { Keep: str, Gone: str, Tmp: str });
+    applyFilters(ir, { schemas: { include: ['/^(Keep|Gone)$/'], exclude: ['Gone'] } }, new Diagnostics());
     expect([...ir.schemas.keys()]).toEqual(['Keep']);
-    expect(ir.operations[0]?.responses[0]?.contents[0]?.schema).toEqual(ref('Gone'));
+  });
+
+  it('replaces refs to removed schemas with unknown and warns once per (schema, location)', () => {
+    const goneRef = (origin: string): IRSchema => ({
+      kind: 'ref',
+      name: 'Gone',
+      nullable: true,
+      description: 'usage-site doc',
+      origin,
+    });
+    const ir = doc(
+      [
+        op('get', '/a', {
+          parameters: [
+            {
+              name: 'p',
+              in: 'query',
+              required: false,
+              deprecated: false,
+              schema: goneRef('#/p'),
+              style: 'form',
+              explode: true,
+              allowReserved: false,
+            },
+          ],
+          requestBody: { required: true, contents: [{ mediaType: 'application/json', kind: 'json', schema: goneRef('#/body') }] },
+          responses: [
+            {
+              status: 200,
+              headers: new Map([['X-H', goneRef('#/header')]]),
+              contents: [{ mediaType: 'application/json', kind: 'json', schema: goneRef('#/res') }],
+            },
+          ],
+        }),
+      ],
+      {
+        Keep: obj({ a: goneRef('#/keep/a'), b: { kind: 'array', items: goneRef('#/keep/b'), nullable: false } }),
+        Gone: str,
+        Pet: {
+          kind: 'union',
+          nullable: false,
+          variants: [ref('Keep'), ref('Gone')],
+          discriminator: { property: 'type', mapping: new Map([['keep', 'Keep'], ['gone', 'Gone']]) },
+        },
+      },
+    );
+    const diagnostics = new Diagnostics();
+    applyFilters(ir, { schemas: { exclude: ['Gone'] } }, diagnostics);
+
+    const unknown: IRSchema = { kind: 'unknown', nullable: true, description: 'usage-site doc', origin: '#/res' };
+    const o = ir.operations[0]!;
+    expect(o.responses[0]?.contents[0]?.schema).toEqual(unknown);
+    expect(o.responses[0]?.headers.get('X-H')).toEqual({ ...unknown, origin: '#/header' });
+    expect(o.parameters[0]?.schema).toEqual({ ...unknown, origin: '#/p' });
+    expect(o.requestBody?.contents[0]?.schema).toEqual({ ...unknown, origin: '#/body' });
+    expect(ir.schemas.get('Keep')).toEqual(
+      obj({ a: { ...unknown, origin: '#/keep/a' }, b: { kind: 'array', items: { ...unknown, origin: '#/keep/b' }, nullable: false } }),
+    );
+    const pet = ir.schemas.get('Pet') as Extract<IRSchema, { kind: 'union' }>;
+    expect(pet.variants).toEqual([ref('Keep'), { kind: 'unknown', nullable: false }]);
+    expect([...(pet.discriminator?.mapping ?? [])]).toEqual([['keep', 'Keep']]);
+
+    const warns = diagnostics.entries.filter((d) => d.code === 'filter-dangling-ref');
+    expect(warns.every((d) => d.level === 'warn' && d.message.includes('"Gone"'))).toBe(true);
+    expect(warns.map((d) => d.pointer).sort()).toEqual(
+      ['#/body', '#/header', '#/keep/a', '#/keep/b', '#/p', '#/res', '#/components/schemas/Pet'].sort(),
+    );
+  });
+
+  it('warns only once for the same missing schema at the same location', () => {
+    const r: IRSchema = { kind: 'ref', name: 'Gone', nullable: false, origin: '#/same' };
+    const ir = doc([op('get', '/a', { responses: jsonResponse(r) }), op('get', '/b', { responses: jsonResponse(r) })], {
+      Gone: str,
+    });
+    const diagnostics = new Diagnostics();
+    applyFilters(ir, { schemas: { exclude: ['Gone'] } }, diagnostics);
+    expect(diagnostics.entries.filter((d) => d.code === 'filter-dangling-ref')).toHaveLength(1);
+  });
+
+  it('deprecated false rewrites refs to removed deprecated schemas', () => {
+    const ir = doc([op('get', '/a', { responses: jsonResponse(ref('Stale')) })], { Stale: { ...str, deprecated: true } });
+    const diagnostics = new Diagnostics();
+    applyFilters(ir, { deprecated: false }, diagnostics);
+    expect(ir.operations[0]?.responses[0]?.contents[0]?.schema).toEqual({ kind: 'unknown', nullable: false });
+    expect(diagnostics.entries.map((d) => d.code)).toEqual(['filter-dangling-ref']);
+  });
+
+  it('throws invalid-filter-pattern naming an invalid regex', () => {
+    const ir = doc([op('get', '/a')]);
+    const run = () => applyFilters(ir, { operations: { include: ['/([a-z/'] } }, new Diagnostics());
+    expect(run).toThrow(ArchonError);
+    expect(run).toThrow(/\/\(\[a-z\//);
+    try {
+      run();
+    } catch (e) {
+      expect((e as ArchonError).code).toBe('invalid-filter-pattern');
+    }
   });
 
   it('deprecated false removes deprecated operations and schemas', () => {
@@ -110,12 +207,12 @@ describe('applyFilters', () => {
       Fresh: str,
       Stale: { ...str, deprecated: true },
     });
-    applyFilters(ir, { deprecated: false });
+    applyFilters(ir, { deprecated: false }, new Diagnostics());
     expect(ids(ir)).toEqual(['GET /a']);
     expect([...ir.schemas.keys()]).toEqual(['Fresh']);
 
     const keep = doc([op('get', '/old', { deprecated: true })], { Stale: { ...str, deprecated: true } });
-    applyFilters(keep, { deprecated: true });
+    applyFilters(keep, { deprecated: true }, new Diagnostics());
     expect(ids(keep)).toEqual(['GET /old']);
     expect([...keep.schemas.keys()]).toEqual(['Stale']);
   });
@@ -124,12 +221,12 @@ describe('applyFilters', () => {
     const mk = () => doc([op('get', '/b'), op('get', '/a'), op('delete', '/z')], { B: str, A: str });
 
     const sorted = mk();
-    applyFilters(sorted, undefined);
+    applyFilters(sorted, undefined, new Diagnostics());
     expect(ids(sorted)).toEqual(['DELETE /z', 'GET /a', 'GET /b']);
     expect([...sorted.schemas.keys()]).toEqual(['A', 'B']);
 
     const kept = mk();
-    applyFilters(kept, { preserveOrder: true });
+    applyFilters(kept, { preserveOrder: true }, new Diagnostics());
     expect(ids(kept)).toEqual(['GET /b', 'GET /a', 'DELETE /z']);
     expect([...kept.schemas.keys()]).toEqual(['B', 'A']);
   });

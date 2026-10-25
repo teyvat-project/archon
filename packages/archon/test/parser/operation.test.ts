@@ -358,3 +358,64 @@ describe('document', () => {
     expect(new Set(ir.operations.map((o) => o.name)).size).toBe(199);
   });
 });
+
+describe('review fixes', () => {
+  test('allowReserved is only kept for query parameters', () => {
+    const { ir } = parse({
+      paths: {
+        '/p/{a}': {
+          get: {
+            parameters: [
+              { name: 'a', in: 'path', required: true, allowReserved: true, schema: { type: 'string' } },
+              { name: 'q', in: 'query', allowReserved: true, schema: { type: 'string' } },
+              { name: 'h', in: 'header', allowReserved: true, schema: { type: 'string' } },
+              { name: 'c', in: 'cookie', allowReserved: true, schema: { type: 'string' } },
+            ],
+            responses: ok,
+          },
+        },
+      },
+    });
+    expect(ir.operations[0]?.parameters.map((p) => [p.name, p.allowReserved])).toEqual([
+      ['a', false],
+      ['q', true],
+      ['h', false],
+      ['c', false],
+    ]);
+  });
+
+  test('falls back to the derived name when the operationId camelCases to an empty string', () => {
+    const { ir, diagnostics } = parse({
+      paths: {
+        '/foo/{id}': { get: { operationId: '日本語の操作', responses: ok } },
+        '/bar': { post: { operationId: '!!!', responses: ok } },
+      },
+    });
+    expect(ir.operations.map((o) => o.name)).toEqual(['getFooById', 'postBar']);
+    const warns = diagnostics.entries.filter((d) => d.code === 'operation-name-fallback');
+    expect(warns.map((d) => [d.level, d.pointer])).toEqual([
+      ['warn', '#/paths/~1foo~1{id}/get'],
+      ['warn', '#/paths/~1bar/post'],
+    ]);
+    expect(warns[0]?.message).toContain('日本語の操作');
+  });
+
+  test('warns when a security requirement names an undefined scheme', () => {
+    const { ir, diagnostics } = parse({
+      components: { securitySchemes: { bearer: { type: 'http', scheme: 'bearer' } } },
+      security: [{ ghost: [] }],
+      paths: {
+        '/a': { get: { responses: ok } },
+        '/b': { get: { security: [{ bearer: [] }, { bearer: [], phantom: ['x'] }], responses: ok } },
+      },
+    });
+    expect(ir.operations).toHaveLength(2);
+    const warns = diagnostics.entries.filter((d) => d.code === 'unknown-security-scheme');
+    expect(warns.map((d) => [d.level, d.pointer])).toEqual([
+      ['warn', '#/paths/~1a/get'],
+      ['warn', '#/paths/~1b/get'],
+    ]);
+    expect(warns[0]?.message).toContain('"ghost"');
+    expect(warns[1]?.message).toContain('"phantom"');
+  });
+});
