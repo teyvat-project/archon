@@ -230,7 +230,7 @@ function renderData(w: CodeWriter, m: OperationModel, typeOf: TypeOf): void {
   const sections = PARAM_SECTIONS.map((s) => ({ ...s, params: op.parameters.filter((p) => p.in === s.in) })).filter(
     (s) => s.params.length > 0,
   );
-    const bodyRequired = body !== undefined && op.requestBody?.required === true;
+  const bodyRequired = body !== undefined && op.requestBody?.required === true;
 
   w.blank();
   if (sections.length === 0 && body === undefined) {

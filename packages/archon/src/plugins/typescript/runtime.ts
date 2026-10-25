@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ArchonError } from '../../diagnostics.js';
 
@@ -7,15 +7,24 @@ import { ArchonError } from '../../diagnostics.js';
 export type RuntimeFile = { name: string; source: string };
 
 /**
- * 手書きランタイムのソースディレクトリを返す。このモジュールに最も近い `package.json` のディレクトリを
- * パッケージルートとし、`<pkgRoot>/runtimes/<language>/src`（build 時にコピーされた配布物）→
- * `<pkgRoot>/../../runtimes/<language>/src`（リポジトリでの開発時）の順に探す。
+ * 手書きランタイムのソースディレクトリを返す。`fromUrl`（既定はこのモジュール）に最も近い `package.json` の
+ * ディレクトリをパッケージルートとする。
+ * - `<pkgRoot>/src` 配下から読み込まれた（リポジトリでの開発時）: `<pkgRoot>/../../runtimes/<language>/src` →
+ *   `<pkgRoot>/runtimes/<language>/src`（build 時のコピーは古い可能性があるので後回し）
+ * - それ以外（`dist/` の配布物）: `<pkgRoot>/runtimes/<language>/src` のみ（インストール先では `<pkgRoot>/../..` が
+ *   無関係なディレクトリになり得るので見ない）
  */
-export function resolveRuntimeDir(language: string): string {
-  const pkgRoot = findPackageRoot(dirname(fileURLToPath(import.meta.url)));
-  const candidates = pkgRoot
-    ? [join(pkgRoot, 'runtimes', language, 'src'), join(pkgRoot, '..', '..', 'runtimes', language, 'src')]
-    : [];
+export function resolveRuntimeDir(language: string, fromUrl: string = import.meta.url): string {
+  const modulePath = fileURLToPath(fromUrl);
+  const pkgRoot = findPackageRoot(dirname(modulePath));
+  const candidates: string[] = [];
+  if (pkgRoot !== undefined) {
+    const packaged = join(pkgRoot, 'runtimes', language, 'src');
+    const rel = relative(join(pkgRoot, 'src'), modulePath);
+    const fromSource = rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+    if (fromSource) candidates.push(join(pkgRoot, '..', '..', 'runtimes', language, 'src'));
+    candidates.push(packaged);
+  }
   const found = candidates.find((dir) => existsSync(join(dir, 'index.ts')));
   if (found === undefined) {
     throw new ArchonError(

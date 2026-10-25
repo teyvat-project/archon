@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ArchonError } from '../../../src/diagnostics.js';
 import { resolveRuntimeDir } from '../../../src/plugins/typescript/runtime.js';
@@ -37,12 +37,57 @@ describe('typescript plugin: vendored runtime', () => {
   });
 
   it('resolveRuntimeDir finds repo runtimes in dev', () => {
-    const dir = resolveRuntimeDir('typescript');
-    expect(dir.endsWith(join('runtimes', 'typescript', 'src'))).toBe(true);
-    expect(existsSync(join(dir, 'client.ts'))).toBe(true);
+    expect(resolveRuntimeDir('typescript')).toBe(repoRuntime);
     expect(() => resolveRuntimeDir('cobol')).toThrow(
       expect.objectContaining({ name: 'ArchonError', code: 'runtime-missing' }) as ArchonError,
     );
+  });
+
+  it('resolveRuntimeDir prefers repo runtimes over a stale build copy when loaded from src', () => {
+    const pkgRoot = mkdtempSync(join(tmpdir(), 'archon-pkg-'));
+    try {
+      // packages/archon/src/plugins/typescript/runtime.ts に相当するレイアウト（repo は <pkgRoot>/../..）
+      const repo = join(pkgRoot, 'repo');
+      const pkg = join(repo, 'packages', 'archon');
+      for (const dir of [join(pkg, 'src', 'plugins', 'typescript'), join(pkg, 'runtimes', 'typescript', 'src'), join(repo, 'runtimes', 'typescript', 'src')]) {
+        mkdirSync(dir, { recursive: true });
+      }
+      writeFileSync(join(pkg, 'package.json'), '{}');
+      writeFileSync(join(pkg, 'runtimes', 'typescript', 'src', 'index.ts'), '');
+      writeFileSync(join(repo, 'runtimes', 'typescript', 'src', 'index.ts'), '');
+      const from = pathToFileURL(join(pkg, 'src', 'plugins', 'typescript', 'runtime.ts')).href;
+      expect(resolveRuntimeDir('typescript', from)).toBe(join(repo, 'runtimes', 'typescript', 'src'));
+
+      // repo に無ければ build コピーを使う
+      rmSync(join(repo, 'runtimes'), { recursive: true });
+      expect(resolveRuntimeDir('typescript', from)).toBe(join(pkg, 'runtimes', 'typescript', 'src'));
+    } finally {
+      rmSync(pkgRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('resolveRuntimeDir uses only the packaged runtimes when loaded from dist', () => {
+    const root = mkdtempSync(join(tmpdir(), 'archon-dist-'));
+    try {
+      // <project>/node_modules/archon/dist/plugins.js。<pkgRoot>/../.. に無関係な runtimes がある
+      const project = join(root, 'project');
+      const pkg = join(project, 'node_modules', 'archon');
+      mkdirSync(join(pkg, 'dist'), { recursive: true });
+      mkdirSync(join(pkg, 'runtimes', 'typescript', 'src'), { recursive: true });
+      mkdirSync(join(project, 'runtimes', 'typescript', 'src'), { recursive: true });
+      writeFileSync(join(pkg, 'package.json'), '{}');
+      writeFileSync(join(pkg, 'runtimes', 'typescript', 'src', 'index.ts'), '');
+      writeFileSync(join(project, 'runtimes', 'typescript', 'src', 'index.ts'), '');
+      const from = pathToFileURL(join(pkg, 'dist', 'plugins.js')).href;
+      expect(resolveRuntimeDir('typescript', from)).toBe(join(pkg, 'runtimes', 'typescript', 'src'));
+
+      rmSync(join(pkg, 'runtimes'), { recursive: true });
+      expect(() => resolveRuntimeDir('typescript', from)).toThrow(
+        expect.objectContaining({ name: 'ArchonError', code: 'runtime-missing' }) as ArchonError,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('generated SDK compiles with tsc', async () => {
