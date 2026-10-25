@@ -256,6 +256,7 @@ export default defineConfig({
 | M4 | Swift 6 | 未着手 |
 | M5 | Rust | 未着手 |
 | M6 | Go 1.22+ | 未着手 |
+| M7 | Ruby 3.2+ | 未着手 |
 
 M1 の TypeScript プラグインでは `bigint`（int64）オプション、`naming.property` / `hooks.propertyName` / `naming.file` / `hooks.fileName` は提供していません。
 
