@@ -11,3 +11,8 @@ export type { TransformsConfig } from './passes/index.js';
 export type { ReadWriteOptions } from './passes/read-write.js';
 export type { FiltersConfig } from './passes/filters.js';
 export type { HoistOptions } from './passes/hoist.js';
+export { defineConfig } from './config/types.js';
+export type { UserConfig, ResolvedConfig, OutputConfig, HeaderContext, PostProcessCommand } from './config/types.js';
+export { loadConfigFile } from './config/load.js';
+export { resolveConfig } from './config/resolve.js';
+export type { EmittedFile, IRRequirements, PluginContext, PluginDefinition, ArchonPlugin } from './plugin/types.js';
