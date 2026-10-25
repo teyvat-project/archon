@@ -11,11 +11,11 @@ test('version matches package.json', () => {
   expect(version).toBe(pkg['version']);
 });
 
-test('package.json builds before packing and declares the supported Node versions', () => {
+test('package.json copies README / LICENSE and builds before packing and declares the supported Node versions', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
     scripts: Record<string, string>;
     engines?: Record<string, string>;
   };
-  expect(pkg.scripts['prepack']).toBe('pnpm run build');
+  expect(pkg.scripts['prepack']).toBe('node scripts/copy-package-files.mjs && pnpm run build');
   expect(pkg.engines).toEqual({ node: '>=22.19.0' });
 });
