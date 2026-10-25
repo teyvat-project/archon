@@ -2,7 +2,7 @@ import type { IRDocument, IRSchema } from '../../ir/types.js';
 import type { PluginContext } from '../../plugin/types.js';
 import type { CodeWriter } from '../../writer/code-writer.js';
 import { UniqueNamer } from '../../writer/naming.js';
-import { csFile, G, GEN, literal, SER, STJ, summary } from './emit.js';
+import { block, csFile, G, GEN, literal, SER, STJ, summary } from './emit.js';
 import type { CSharpPluginOptions } from './index.js';
 import { csIdentifier, fileBaseName, type CsNames } from './names.js';
 import type { CsType, CsTypeResolver } from './types.js';
@@ -95,7 +95,7 @@ function renderClass(
   const members = c.names.members(c.schemaName);
   const isBase = c.plan.polymorphic.has(c.schemaName);
   const baseName = base !== undefined ? c.names.types.get(base) : undefined;
-  w.block(`public ${isBase ? '' : 'sealed '}partial class ${c.typeName}${baseName ? ` : ${baseName}` : ''}`, () => {
+  block(w, `public ${isBase ? '' : 'sealed '}partial class ${c.typeName}${baseName ? ` : ${baseName}` : ''}`, () => {
     let first = true;
     for (const p of c.schema.properties) {
       if (p.name === dropped) continue;
@@ -133,8 +133,8 @@ function renderEnum(w: CodeWriter, schema: EnumSchema, typeName: string): void {
   const converter = `${typeName}JsonConverter`;
 
   w.line(`[${SER}.JsonConverter(typeof(${converter}))]`);
-  w.block(`public readonly partial struct ${typeName} : ${G}.IEquatable<${typeName}>`, () => {
-    w.block(`public ${typeName}(${valueType} value)`, () => {
+  block(w, `public readonly partial struct ${typeName} : ${G}.IEquatable<${typeName}>`, () => {
+    block(w, `public ${typeName}(${valueType} value)`, () => {
       w.line(isString ? `Value = value ?? throw new ${G}.ArgumentNullException(nameof(value));` : 'Value = value;');
     });
     w.blank();
@@ -175,7 +175,7 @@ function renderEnum(w: CodeWriter, schema: EnumSchema, typeName: string): void {
     w.line(`public static implicit operator ${typeName}(${valueType} value) => new(value);`);
   });
   w.blank();
-  w.block(`internal sealed class ${converter} : ${SER}.JsonConverter<${typeName}>`, () => {
+  block(w, `internal sealed class ${converter} : ${SER}.JsonConverter<${typeName}>`, () => {
     const read = isString ? 'reader.GetString()!' : valueType === 'long' ? 'reader.GetInt64()' : 'reader.GetDouble()';
     w.line(`public override ${typeName} Read(ref ${STJ}.Utf8JsonReader reader, ${G}.Type typeToConvert, ${STJ}.JsonSerializerOptions options)`);
     w.line(`    => new(${read});`);
@@ -193,7 +193,7 @@ function enumMemberBase(value: string | number): string {
 function renderPolymorphicBase(w: CodeWriter, typeName: string, plan: { property: string; variants: Map<string, string> }, names: CsNames): void {
   w.line(`[${SER}.JsonPolymorphic(TypeDiscriminatorPropertyName = ${literal(plan.property)}, IgnoreUnrecognizedTypeDiscriminators = true)]`);
   for (const [tag, variant] of plan.variants) w.line(`[${SER}.JsonDerivedType(typeof(${names.types.get(variant)}), ${literal(tag)})]`);
-  w.block(`public partial class ${typeName}`, () => {
+  block(w, `public partial class ${typeName}`, () => {
     w.line('/// <summary>');
     w.line(`/// Properties not mapped to members. An object whose <c>${plan.property}</c> is not a known value is read as a`);
     w.line(`/// plain <see cref="${typeName}"/> with all its other properties here (the unknown value itself is not kept).`);
@@ -218,10 +218,10 @@ function renderWrapper(w: CodeWriter, schema: UnionSchema, typeName: string, pat
   const info = (t: CsType) => `(${STJ}.Serialization.Metadata.JsonTypeInfo<${t.code}>)options.GetTypeInfo(typeof(${t.code}))`;
 
   w.line(`[${SER}.JsonConverter(typeof(${converter}))]`);
-  w.block(`public sealed partial class ${typeName}`, () => {
+  block(w, `public sealed partial class ${typeName}`, () => {
     w.line('private readonly object? _value;');
     w.blank();
-    w.block(`private ${typeName}(object? value, ${STJ}.JsonElement? unknown)`, () => {
+    block(w, `private ${typeName}(object? value, ${STJ}.JsonElement? unknown)`, () => {
       w.line('_value = value;');
       w.line('Unknown = unknown;');
     });
@@ -245,7 +245,7 @@ function renderWrapper(w: CodeWriter, schema: UnionSchema, typeName: string, pat
       w.blank();
       w.line(
         v.type.valueType
-          ? `public ${v.type.code}? ${v.accessor} => _value is ${v.type.code} v ? v : null;`
+          ? `public ${v.type.code}? ${v.accessor} => _value as ${v.type.code}?;`
           : `public ${v.type.code}? ${v.accessor} => _value as ${v.type.code};`,
       );
     }
@@ -253,17 +253,17 @@ function renderWrapper(w: CodeWriter, schema: UnionSchema, typeName: string, pat
     w.line(`public static ${typeName} FromUnknown(${STJ}.JsonElement raw) => new(null, raw.Clone());`);
   });
   w.blank();
-  w.block(`internal sealed class ${converter} : ${SER}.JsonConverter<${typeName}>`, () => {
-    w.block(`public override ${typeName}? Read(ref ${STJ}.Utf8JsonReader reader, ${G}.Type typeToConvert, ${STJ}.JsonSerializerOptions options)`, () => {
+  block(w, `internal sealed class ${converter} : ${SER}.JsonConverter<${typeName}>`, () => {
+    block(w, `public override ${typeName}? Read(ref ${STJ}.Utf8JsonReader reader, ${G}.Type typeToConvert, ${STJ}.JsonSerializerOptions options)`, () => {
       w.line(`using var document = ${STJ}.JsonDocument.ParseValue(ref reader);`);
       w.line('var element = document.RootElement;');
       const discriminator = schema.discriminator;
       if (discriminator) {
         const kind = `${STJ}.JsonValueKind`;
-        w.block(
+        block(w, 
           `if (element.ValueKind == ${kind}.Object && element.TryGetProperty(${literal(discriminator.property)}, out var tag) && tag.ValueKind == ${kind}.String)`,
           () => {
-            w.block('switch (tag.GetString())', () => {
+            block(w, 'switch (tag.GetString())', () => {
               for (const [tag, target] of discriminator.mapping) {
                 const t = resolver.typeOf({ kind: 'ref', name: target, nullable: false }, path, 'model');
                 if (!variants.some((v) => v.type.code === t.code)) continue;
@@ -275,10 +275,10 @@ function renderWrapper(w: CodeWriter, schema: UnionSchema, typeName: string, pat
         );
       } else {
         for (const v of variants) {
-          w.block('try', () => {
+          block(w, 'try', () => {
             w.line(`return new ${typeName}(${STJ}.JsonSerializer.Deserialize(element, ${info(v.type)})!);`);
           });
-          w.block(`catch (${STJ}.JsonException)`, () => {
+          block(w, `catch (${STJ}.JsonException)`, () => {
             w.line('// not this variant');
           });
         }
@@ -286,8 +286,8 @@ function renderWrapper(w: CodeWriter, schema: UnionSchema, typeName: string, pat
       w.line(`return ${typeName}.FromUnknown(element);`);
     });
     w.blank();
-    w.block(`public override void Write(${STJ}.Utf8JsonWriter writer, ${typeName} value, ${STJ}.JsonSerializerOptions options)`, () => {
-      w.block('switch (value.Value)', () => {
+    block(w, `public override void Write(${STJ}.Utf8JsonWriter writer, ${typeName} value, ${STJ}.JsonSerializerOptions options)`, () => {
+      block(w, 'switch (value.Value)', () => {
         for (const v of variants) {
           w.line(`case ${v.type.code} v:`);
           w.line(`    ${STJ}.JsonSerializer.Serialize(writer, v, ${info(v.type)});`);

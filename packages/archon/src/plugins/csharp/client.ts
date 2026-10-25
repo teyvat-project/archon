@@ -1,7 +1,7 @@
 import type { IRDocument, IROAuthFlows, IRSecurityScheme } from '../../ir/types.js';
 import type { PluginContext } from '../../plugin/types.js';
 import { UniqueNamer } from '../../writer/naming.js';
-import { csFile, G, GEN, literal, summary } from './emit.js';
+import { block, csFile, G, GEN, literal, summary } from './emit.js';
 import type { CSharpPluginOptions } from './index.js';
 import { csIdentifier } from './names.js';
 import { RESERVED_MEMBERS } from './reserved.js';
@@ -61,7 +61,7 @@ export function renderClient(ctx: PluginContext<CSharpPluginOptions>, namespace:
   const client = ctx.options.clientName;
   const w = csFile(ctx, namespace, [`${namespace}.Core`]);
   summary(w, `Client for ${ctx.ir.info.title}.`);
-  w.block(`public sealed partial class ${client}`, () => {
+  block(w, `public sealed partial class ${client}`, () => {
     w.line(`public const string DefaultBaseUrl = ${literal(defaultBaseUrl(ctx.ir))};`);
     w.blank();
     const entries = schemes(ctx.ir);
@@ -72,7 +72,7 @@ export function renderClient(ctx: PluginContext<CSharpPluginOptions>, namespace:
     w.blank();
     w.line(`public ${client}() : this(new ${client}Options()) { }`);
     w.blank();
-    w.block(`public ${client}(${client}Options options)`, () => {
+    block(w, `public ${client}(${client}Options options)`, () => {
       w.line(`Options = options ?? throw new ${G}.ArgumentNullException(nameof(options));`);
       w.line('Core = new ApiClientCore(options, SecuritySchemes);');
       for (const s of services) w.line(`${s.property} = new ${s.className}(Core);`);
@@ -89,14 +89,14 @@ export function renderClient(ctx: PluginContext<CSharpPluginOptions>, namespace:
     }
     w.blank();
     w.line('/// <summary>Appends a middleware (inside those already registered, outside authentication).</summary>');
-    w.block(`public ${client} Use(IApiMiddleware middleware)`, () => {
+    block(w, `public ${client} Use(IApiMiddleware middleware)`, () => {
       w.line('Core.Use(middleware);');
       w.line('return this;');
     });
   });
   w.blank();
-  w.block(`public sealed class ${client}Options : ClientOptions<ApiAuth>`, () => {
-    w.block(`public ${client}Options()`, () => {
+  block(w, `public sealed class ${client}Options : ClientOptions<ApiAuth>`, () => {
+    block(w, `public ${client}Options()`, () => {
       w.line(`BaseUrl = ${client}.DefaultBaseUrl;`);
     });
   });
@@ -110,7 +110,7 @@ export function renderAuth(ctx: PluginContext<CSharpPluginOptions>, namespace: s
   const props = entries.map((s) => ({ ...s, property: namer.claim(csIdentifier(s.name, 'PascalCase')) }));
   const w = csFile(ctx, namespace, [`${namespace}.Core`]);
   w.line('/// <summary>Credentials per security scheme; unset schemes are not applied.</summary>');
-  w.block('public sealed class ApiAuth : IAuthConfig', () => {
+  block(w, 'public sealed class ApiAuth : IAuthConfig', () => {
     for (const p of props) {
       w.line(`/// <summary>Security scheme <c>${p.name}</c>.</summary>`);
       w.line(`public ${p.value}? ${p.property} { get; set; }`);

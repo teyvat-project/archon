@@ -40,3 +40,11 @@ export function literal(value: string): string {
   // U+2028 / U+2029 end a line in C#, so they are escaped too.
   return JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 }
+
+/** An Allman-style block: the header, `{`, the indented body, `}`. */
+export function block(w: CodeWriter, header: string, fn: () => void): void {
+  w.line(header);
+  w.line('{');
+  w.indent(fn);
+  w.line('}');
+}

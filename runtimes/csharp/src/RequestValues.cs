@@ -50,7 +50,7 @@ public sealed partial class RequestValues
     /// <summary>An <c>application/x-www-form-urlencoded</c> body from the value's JSON properties.</summary>
     public RequestValues FormBody<T>(T value, JsonTypeInfo<T> info)
     {
-        var body = Runtime.FormBody.FromJson(JsonSerializer.SerializeToElement(value, info));
+        var body = global::Archon.Runtime.FormBody.FromJson(JsonSerializer.SerializeToElement(value, info));
         BodyFactory = _ => body;
         return this;
     }

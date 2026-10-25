@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <IsAotCompatible>true</IsAotCompatible>
+    <RootNamespace>ArchonEdgeCases</RootNamespace>
+    <AssemblyName>ArchonEdgeCases</AssemblyName>
+    <PackageId>ArchonEdgeCases</PackageId>
+    <Version>1.0.0</Version>
+    <Description>Covers every feature the generators support. Implemented by the mock server in e2e/mock-server and exercised by the end-to-end suites.</Description>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1573;CS1591</NoWarn>
+  </PropertyGroup>
+</Project>

@@ -133,7 +133,7 @@ describe('csharp plugin: models', () => {
   it('names hoisted inline unions and value-type accessors', async () => {
     const { files } = await generate(doc({ Holder: obj([prop('either', union([int, str]))]) }));
     expect(file(files, 'Models/Holder.cs')).toContain('public HolderEither? Either { get; set; }');
-    expect(file(files, 'Models/HolderEither.cs')).toContain('public int? Int => _value is int v ? v : null;');
+    expect(file(files, 'Models/HolderEither.cs')).toContain('public int? Int => _value as int?;');
   });
 
   it('marks deprecated schemas Obsolete and escapes XML doc', async () => {

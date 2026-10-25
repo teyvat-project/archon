@@ -1,5 +1,5 @@
 import type { PluginContext } from '../../plugin/types.js';
-import { csFile, SER } from './emit.js';
+import { block, csFile, SER } from './emit.js';
 import type { CSharpPluginOptions } from './index.js';
 import type { CsTypeResolver } from './types.js';
 
@@ -13,6 +13,6 @@ export function renderJsonContext(ctx: PluginContext<CSharpPluginOptions>, resol
   for (const { code, property } of resolver.registered()) {
     w.line(`[${SER}.JsonSerializable(typeof(${code}), TypeInfoPropertyName = "${property}")]`);
   }
-  w.block(`public partial class ${JSON_CONTEXT} : ${SER}.JsonSerializerContext`, () => {});
+  block(w, `public partial class ${JSON_CONTEXT} : ${SER}.JsonSerializerContext`, () => {});
   return w.toString();
 }

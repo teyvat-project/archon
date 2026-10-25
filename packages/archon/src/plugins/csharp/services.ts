@@ -3,7 +3,7 @@ import { matchesPattern } from '../../passes/filters.js';
 import type { PluginContext } from '../../plugin/types.js';
 import type { CodeWriter } from '../../writer/code-writer.js';
 import { applyTemplate, toCase, UniqueNamer } from '../../writer/naming.js';
-import { csFile, escapeXml, G, GEN, literal, summary } from './emit.js';
+import { block, csFile, escapeXml, G, GEN, literal, summary } from './emit.js';
 import type { CSharpPluginOptions } from './index.js';
 import { JSON_CONTEXT } from './json-context.js';
 import { isFileType } from './models.js';
@@ -74,10 +74,10 @@ export function renderServices(
     const members = ops.filter((op) => (op.group ?? 'Default') === service.group);
     const w = csFile(ctx, resolver.namespace, [`${resolver.namespace}.Core`]);
     const memberNames = new UniqueNamer(['_core', service.className, ...RESERVED_MEMBERS]);
-    w.block(`public sealed partial class ${service.className}`, () => {
+    block(w, `public sealed partial class ${service.className}`, () => {
       w.line('private readonly ApiClientCore _core;');
       w.blank();
-      w.block(`internal ${service.className}(ApiClientCore core)`, () => {
+      block(w, `internal ${service.className}(ApiClientCore core)`, () => {
         w.line('_core = core;');
       });
       for (const op of members) {
@@ -166,7 +166,7 @@ function renderOperation(ctx: PluginContext<CSharpPluginOptions>, w: CodeWriter,
   }
   w.blank();
   doc();
-  w.block(`public ${TASK}<${dataType === undefined ? 'ApiResult' : `ApiResult<${dataType}>`}> ${n.withResponse}(${signature})`, () => {
+  block(w, `public ${TASK}<${dataType === undefined ? 'ApiResult' : `ApiResult<${dataType}>`}> ${n.withResponse}(${signature})`, () => {
     const chain = params.map((p) => {
       const info = resolver.register(p.type, p.nullable);
       return `.${PARAM_IN[p.ir.in]}(${literal(p.ir.name)}, ${p.name}, ${JSON_CONTEXT}.Default.${info})`;
@@ -214,14 +214,14 @@ function objectSchemaName(schema: IRSchema, resolver: CsTypeResolver): string | 
 function bodyExpression(body: Body, names: CsNames, resolver: CsTypeResolver): string {
   switch (body.media.kind) {
     case 'json':
-      return `.JsonBody(body, ${JSON_CONTEXT}.Default.${resolver.register(body.type)})`;
+      return `.JsonBody(body, ${JSON_CONTEXT}.Default.${resolver.register(body.type, body.nullable)})`;
     case 'text':
       return '.TextBody(body)';
     case 'binary':
       return '.BinaryBody(body)';
     case 'form': {
       if (body.type.code === 'FormBody') return '.Body(body)';
-      return `.FormBody(body, ${JSON_CONTEXT}.Default.${resolver.register(body.type)})`;
+      return `.FormBody(body, ${JSON_CONTEXT}.Default.${resolver.register(body.type, body.nullable)})`;
     }
     case 'multipart': {
       const schemaName = objectSchemaName(body.media.schema, resolver);
