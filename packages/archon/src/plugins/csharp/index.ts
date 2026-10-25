@@ -1,7 +1,7 @@
 import { ArchonError } from '../../diagnostics.js';
 import type { IROperation, IRSchema } from '../../ir/types.js';
 import type { SchemaPath } from '../../ir/walk.js';
-import { definePlugin } from '../../plugin/define.js';
+import { definePlugin, type PluginFactory } from '../../plugin/define.js';
 import { resolveRuntimeDir } from '../../plugin/runtime.js';
 import type { NameCase } from '../../writer/naming.js';
 import { JSON_CONTEXT, renderJsonContext } from './json-context.js';
@@ -53,7 +53,7 @@ export interface CSharpPluginAPI {
 /** Names the generated code itself uses in the root namespace. */
 const FIXED_NAMES = ['Core', JSON_CONTEXT, 'ApiAuth'];
 
-export const csharp = definePlugin<CSharpPluginOptions, CSharpPluginAPI>({
+export const csharp: PluginFactory<CSharpPluginOptions, CSharpPluginAPI> = definePlugin<CSharpPluginOptions, CSharpPluginAPI>({
   name: 'csharp',
   defaults: {
     output: 'csharp',

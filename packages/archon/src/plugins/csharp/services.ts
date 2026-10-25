@@ -26,7 +26,7 @@ const STYLE = {
 const BODY_KIND = { json: 'Json', form: 'Form', multipart: 'Multipart', text: 'Text', binary: 'Binary' } as const;
 
 /** Members of the client class that a service property must not take. */
-export const CLIENT_MEMBERS = ['Options', 'Core', 'Use', 'DefaultBaseUrl', 'SecuritySchemes', ...RESERVED_MEMBERS];
+export const CLIENT_MEMBERS: string[] = ['Options', 'Core', 'Use', 'DefaultBaseUrl', 'SecuritySchemes', ...RESERVED_MEMBERS];
 
 export type ServiceName = { group: string; className: string; property: string };
 

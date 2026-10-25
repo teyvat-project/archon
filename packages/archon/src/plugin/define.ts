@@ -9,6 +9,9 @@ export type DeepPartial<T> = T extends (...args: never[]) => unknown
       ? { [K in keyof T]?: DeepPartial<T[K]> }
       : T;
 
+/** `definePlugin` が返すユーザー向けファクトリ関数。 */
+export type PluginFactory<O, API = void> = (options?: DeepPartial<O>) => ArchonPlugin<O, API>;
+
 /**
  * プラグインを定義し、ユーザー向けのファクトリ関数を返す。
  * ファクトリに渡した options は `defaults` に deep merge される
@@ -16,7 +19,7 @@ export type DeepPartial<T> = T extends (...args: never[]) => unknown
  */
 export function definePlugin<O, API = void>(
   def: PluginDefinition<O, API>,
-): (options?: DeepPartial<O>) => ArchonPlugin<O, API> {
+): PluginFactory<O, API> {
   return (options) => ({
     name: def.name,
     options: deepMerge(def.defaults, options) as O,

@@ -73,7 +73,7 @@ function run(command: string, args: string[], cwd: string): Promise<{ code: numb
   });
 }
 
-describe.skipIf(!hasDotnet10).sequential('compile: generated C# SDK builds with dotnet build -warnaserror', () => {
+describe.skipIf(!hasDotnet10)('compile: generated C# SDK builds with dotnet build -warnaserror', () => {
   it.each(cases)('$name', async ({ spec, options, filters }) => {
     const dir = await mkdtemp(join(tmpdir(), 'archon-cs-compile-'));
     try {

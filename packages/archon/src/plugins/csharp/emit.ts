@@ -3,9 +3,9 @@ import type { CodeWriter } from '../../writer/code-writer.js';
 import type { CSharpPluginOptions } from './index.js';
 
 export const G = 'global::System';
-export const GEN = `${G}.Collections.Generic`;
-export const STJ = `${G}.Text.Json`;
-export const SER = `${STJ}.Serialization`;
+export const GEN: string = `${G}.Collections.Generic`;
+export const STJ: string = `${G}.Text.Json`;
+export const SER: string = `${STJ}.Serialization`;
 
 /** A writer with 4-space indentation, the generated header, nullable context and the namespace. */
 export function csFile(ctx: PluginContext<CSharpPluginOptions>, namespace: string, usings: string[] = []): CodeWriter {
