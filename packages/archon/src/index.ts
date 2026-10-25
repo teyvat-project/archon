@@ -16,3 +16,10 @@ export type { UserConfig, ResolvedConfig, OutputConfig, HeaderContext, PostProce
 export { loadConfigFile } from './config/load.js';
 export { resolveConfig } from './config/resolve.js';
 export type { EmittedFile, IRRequirements, PluginContext, PluginDefinition, ArchonPlugin } from './plugin/types.js';
+export { definePlugin } from './plugin/define.js';
+export type { DeepPartial } from './plugin/define.js';
+export { runPlugins, resolveOutputDir } from './plugin/host.js';
+export { CodeWriter } from './writer/code-writer.js';
+export { splitWords, toCase, applyTemplate, UniqueNamer } from './writer/naming.js';
+export type { NameCase } from './writer/naming.js';
+export { writeOutput } from './writer/output.js';
