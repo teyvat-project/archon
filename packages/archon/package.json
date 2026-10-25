@@ -1,0 +1,22 @@
+{
+  "name": "archon",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@apidevtools/json-schema-ref-parser": "^11.9.3",
+    "cac": "^6.7.14",
+    "jiti": "^2.7.0",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}
