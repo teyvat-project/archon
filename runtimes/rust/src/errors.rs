@@ -9,8 +9,8 @@ type Source = Box<dyn StdError + Send + Sync>;
 /// middleware, which sees non-2xx responses as responses).
 #[derive(Debug)]
 pub enum Error<E = ()> {
-    /// A non-2xx response.
-    Api(ApiError<E>),
+    /// A non-2xx response (boxed: it holds the whole response, and keeps `Result`s small).
+    Api(Box<ApiError<E>>),
     /// The request could not be sent or the response could not be read (network failure, timeout).
     Transport(TransportError),
     /// A successful response whose body could not be decoded.
@@ -33,7 +33,7 @@ impl<E> Error<E> {
     /// The [`ApiError`], when this is a non-2xx response.
     pub fn api_error(&self) -> Option<&ApiError<E>> {
         match self {
-            Error::Api(e) => Some(e),
+            Error::Api(e) => Some(e.as_ref()),
             _ => None,
         }
     }
@@ -44,7 +44,8 @@ impl Error<()> {
     pub fn with_body_type<F>(self) -> Error<F> {
         match self {
             Error::Api(e) => {
-                Error::Api(ApiError { status: e.status, headers: e.headers, url: e.url, raw_body: e.raw_body, body: None })
+                let ApiError { status, headers, url, raw_body, body: _ } = *e;
+                Error::Api(Box::new(ApiError { status, headers, url, raw_body, body: None }))
             }
             Error::Transport(e) => Error::Transport(e),
             Error::Decode(e) => Error::Decode(e),

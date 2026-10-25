@@ -1,3 +1,4 @@
+use std::fmt;
 use std::sync::{Arc, OnceLock, RwLock};
 
 use crate::auth::AuthMiddleware;
@@ -120,13 +121,13 @@ impl ApiClientCore {
         let response = Next::new(&chain, &context, &transport).run(request).await.map_err(Error::with_body_type)?;
         if !response.is_success() {
             let body = E::decode(response.status, &response.data);
-            return Err(Error::Api(ApiError {
+            return Err(Error::Api(Box::new(ApiError {
                 status: response.status,
                 headers: response.headers,
                 url: response.url,
                 raw_body: response.data,
                 body,
-            }));
+            })));
         }
         let data = decode(response.status, &response.data)?;
         Ok(ApiResponse { status: response.status, headers: response.headers, url: response.url, data })
@@ -195,5 +196,11 @@ impl ApiClientCore {
             headers.set("Accept", if json { "application/json" } else { "*/*" });
         }
         Ok(ApiRequest { method: operation.method.clone(), url, headers, body })
+    }
+}
+
+impl fmt::Debug for ApiClientCore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ApiClientCore").field("options", &self.shared.options).finish_non_exhaustive()
     }
 }
