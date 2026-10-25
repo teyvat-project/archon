@@ -20,7 +20,7 @@
     "runtimes"
   ],
   "scripts": {
-    "build": "node scripts/copy-runtimes.mjs && tsup",
+    "build": "node scripts/copy-runtimes.mjs && tsdown",
     "prepack": "pnpm run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p ."
@@ -36,7 +36,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
-    "tsup": "^9.0.0",
+    "tsdown": "^0.23.2",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   }

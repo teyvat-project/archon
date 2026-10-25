@@ -1,7 +1,7 @@
 import { ArchonError } from '../../diagnostics.js';
 import type { IROperation, IRSchema } from '../../ir/types.js';
 import type { SchemaPath } from '../../ir/walk.js';
-import { definePlugin } from '../../plugin/define.js';
+import { definePlugin, type PluginFactory } from '../../plugin/define.js';
 import type { NameCase } from '../../writer/naming.js';
 import { CLIENT_EXPORTS, renderClient, renderIndex } from './client.js';
 import { renderPackageJson, renderTsconfig } from './package.js';
@@ -67,7 +67,7 @@ const SDK_FILE = 'sdk.gen.ts';
  */
 const GENERATED_NAMES = [...CLIENT_EXPORTS, ...SDK_EXPORTS, 'AbortSignal'];
 
-export const typescript = definePlugin<TypeScriptPluginOptions, TypeScriptPluginAPI>({
+export const typescript: PluginFactory<TypeScriptPluginOptions, TypeScriptPluginAPI> = definePlugin<TypeScriptPluginOptions, TypeScriptPluginAPI>({
   name: 'typescript',
   defaults: {
     output: 'typescript',
