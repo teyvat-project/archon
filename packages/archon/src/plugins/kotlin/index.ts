@@ -4,9 +4,12 @@ import type { SchemaPath } from '../../ir/walk.js';
 import { definePlugin, type PluginFactory } from '../../plugin/define.js';
 import { resolveRuntimeDir } from '../../plugin/runtime.js';
 import type { NamingRule } from '../csharp/index.js';
+import { renderAuth, renderClient } from './client.js';
 import { planUnions, renderModels } from './models.js';
 import { buildNames, packageDir, resolvePackageName } from './names.js';
+import { renderProject } from './project.js';
 import { readKtRuntime, rewritePackage, runtimeTypeNames } from './runtime.js';
+import { buildServiceNames, renderServices, selectOperations } from './services.js';
 import { KtTypeResolver, type KtTypeMapping } from './types.js';
 
 export interface KotlinPluginOptions {
@@ -65,11 +68,25 @@ export const kotlin: PluginFactory<KotlinPluginOptions, KotlinPluginAPI> = defin
     const runtimeNames = runtimeTypeNames(runtime);
     const packageName = resolvePackageName(ctx.ir, opts);
     const dir = packageDir(packageName);
-    const names = buildNames(ctx.ir, opts, [...runtimeNames, opts.clientName, `${opts.clientName}Options`, 'ApiAuth']);
+    const ops = selectOperations(ctx.ir.operations, opts);
+    const services = buildServiceNames(ops);
+    const reserved = [
+      ...runtimeNames,
+      opts.clientName,
+      `${opts.clientName}Options`,
+      'ApiAuth',
+      ...[...services.values()].map((s) => s.className),
+    ];
+    const names = buildNames(ctx.ir, opts, reserved);
     const resolver = new KtTypeResolver(ctx.ir, names, opts, ctx.diagnostics, packageName);
     const plan = planUnions(ctx.ir, names, resolver);
 
     for (const model of renderModels(ctx, names, resolver, plan, runtimeNames)) ctx.emit(model.path, model.content);
+    const rendered = renderServices(ctx, ops, services, names, resolver, runtimeNames);
+    for (const service of rendered.files) ctx.emit(service.path, service.content);
+    ctx.emit(`${dir}/${opts.clientName}.kt`, renderClient(ctx, packageName, [...services.values()], runtimeNames));
+    ctx.emit(`${dir}/ApiAuth.kt`, renderAuth(ctx, packageName, runtimeNames));
+    for (const file of renderProject(ctx, packageName)) ctx.emit(file.file, file.content);
 
     const header = ctx.writer().comment(ctx.headerLines('kotlin'), 'line').toString();
     for (const file of runtime) {
@@ -85,7 +102,17 @@ export const kotlin: PluginFactory<KotlinPluginOptions, KotlinPluginAPI> = defin
           return { name, packageName: `${packageName}.models`, file: `${dir}/models/${names.files.get(schemaName)}.kt` };
         },
         operation(operationId) {
-          throw new ArchonError('unknown-operation', `Unknown operation "${operationId}" (or excluded from the SDK).`);
+          const op = rendered.operations.get(operationId);
+          if (op === undefined) {
+            throw new ArchonError('unknown-operation', `Unknown operation "${operationId}" (or excluded from the SDK).`);
+          }
+          return {
+            service: op.className,
+            property: op.property,
+            method: op.method,
+            withResponseMethod: op.withResponse,
+            file: `${dir}/services/${op.className}.kt`,
+          };
         },
       },
     };
