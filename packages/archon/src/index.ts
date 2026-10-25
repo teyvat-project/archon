@@ -1,0 +1,27 @@
+export const version = '0.1.0';
+
+export type * from './ir/types.js';
+export type { SchemaPath } from './ir/walk.js';
+export { ArchonError, Diagnostics } from './diagnostics.js';
+export type { Diagnostic } from './diagnostics.js';
+export { parseDocument } from './parser/index.js';
+export type { ParserHooks } from './parser/index.js';
+export { runCommonPasses, runPluginPasses } from './passes/index.js';
+export type { TransformsConfig } from './passes/index.js';
+export type { ReadWriteOptions } from './passes/read-write.js';
+export type { FiltersConfig } from './passes/filters.js';
+export type { HoistOptions } from './passes/hoist.js';
+export { defineConfig } from './config/types.js';
+export type { UserConfig, ResolvedConfig, OutputConfig, HeaderContext, PostProcessCommand } from './config/types.js';
+export { loadConfigFile, findConfigFile } from './config/load.js';
+export { resolveConfig } from './config/resolve.js';
+export type { EmittedFile, IRRequirements, PluginContext, PluginDefinition, ArchonPlugin } from './plugin/types.js';
+export { definePlugin } from './plugin/define.js';
+export type { DeepPartial } from './plugin/define.js';
+export { runPlugins } from './plugin/host.js';
+export { CodeWriter } from './writer/code-writer.js';
+export { splitWords, toCase, applyTemplate, UniqueNamer } from './writer/naming.js';
+export type { NameCase } from './writer/naming.js';
+export { writeOutput } from './writer/output.js';
+export { generate } from './generate.js';
+export type { GenerateOptions, GenerateResult } from './generate.js';

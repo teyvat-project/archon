@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@natsuneko-laboratory/archon": ["../../packages/archon/src/index.ts"],
+      "@natsuneko-laboratory/archon/plugins": ["../../packages/archon/src/plugins.ts"]
+    }
+  },
+  "include": ["global-setup.ts", "vitest.config.ts", "test", "generated"]
+}

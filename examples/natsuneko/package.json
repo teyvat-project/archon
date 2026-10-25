@@ -1,0 +1,12 @@
+{
+  "name": "@natsuneko-laboratory/archon-example-natsuneko",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "archon generate"
+  },
+  "devDependencies": {
+    "@natsuneko-laboratory/archon": "workspace:*"
+  }
+}

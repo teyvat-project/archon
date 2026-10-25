@@ -1,0 +1,8 @@
+{
+  "name": "archon-edge-cases",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  }
+}
