@@ -1,5 +1,7 @@
 export { csharp } from './plugins/csharp/index.js';
 export type { CSharpPluginAPI, CSharpPluginOptions } from './plugins/csharp/index.js';
+export { go } from './plugins/go/index.js';
+export type { GoPluginAPI, GoPluginOptions } from './plugins/go/index.js';
 export { kotlin } from './plugins/kotlin/index.js';
 export type { KotlinPluginAPI, KotlinPluginOptions } from './plugins/kotlin/index.js';
 export { swift } from './plugins/swift/index.js';
