@@ -57,6 +57,9 @@ export default defineConfig({
       // "METHOD /path" の完全一致、または "/regex/"。include と exclude の両方に一致したら exclude が優先
       operations: { include: ['/^GET /catalyst/'], exclude: ['DELETE /catalyst/v1/blocks'] },
       tags: { exclude: ['activitypub'] },
+      // schemas / deprecated: false で除いた schema がまだ参照されていると、その参照は unknown 型になり
+      // filter-dangling-ref の警告が出る（不正な /regex/ は invalid-filter-pattern エラー）
+      schemas: { exclude: ['/^Internal/'] },
     },
     transforms: {
       schemaName: 'Api{{name}}', // テンプレートまたは (name) => string
@@ -84,7 +87,7 @@ TypeScript プラグインの主なオプション（すべて任意）:
 | `package` | info から導出 | `package.json` / `tsconfig.json` の情報。`false` で生成しない |
 | `sdk.style` | `'functions'` | `getX(options)` 関数、または `class`（static メソッド） |
 | `enums` | `'union'` | named enum の宣言形式 |
-| `dates` | `'string'` | `'Date'` にすると応答の日時を `Date` に変換する（`transformers.gen.ts`） |
+| `dates` | `'string'` | `'Date'` にすると成功応答の日時を `Date` に変換する（`transformers.gen.ts`）。エラーボディは変換されないので、エラー型の日時は常に `string`（共有 schema は `DatesAsString<T>` で包む） |
 | `importExtension` | `'.js'` | 生成コードの相対 import の拡張子（`'.ts'` / `''` も可） |
 | `naming` | PascalCase / camelCase | `{ type, method }` ごとに `{ case, name }` |
 | `typeMappings` | `{}` | `'string:uuid': 'Uuid'` のような `kind:format` → TS 型式の上書き |
@@ -100,7 +103,7 @@ TypeScript プラグインの主なオプション（すべて任意）:
 ```ts
 import { createApiClient, getCatalystV1Announcements, getCatalystV1StatusById } from './sdk/ts/index.js';
 
-// baseUrl の既定は spec の servers[0]
+// baseUrl の既定は spec の servers[0]（servers が無ければ '/'）
 const client = createApiClient({
   auth: { bearerAuth: 'my-token' }, // または () => getToken()
   headers: { 'X-App': 'demo' },
@@ -120,6 +123,13 @@ const { data: list } = await getCatalystV1Announcements({ client, throwOnError: 
 
 `client` を省略すると生成済みの共有クライアント（`client.gen.ts` の `client`）が使われます。各呼び出しには
 `signal`（`AbortSignal`）、`baseUrl`、`extensions`（middleware に渡す任意値）も指定できます。
+
+`baseUrl` が相対（spec の servers が `/api` のような相対 URL、または servers が無く既定の `/`）の場合、ブラウザでは
+`location.href` に対して解決します。`location` の無い環境（Node.js / Workers など）では `TypeError` になるので、
+`createApiClient({ baseUrl: 'https://api.example.com' })` のように絶対 URL を渡してください。
+
+パスパラメータの値が `''` / `.` / `..` になる（そのセグメントが空や dot segment になる）呼び出しは、URL の正規化で
+別のパスに送られるのを防ぐため送信前に `TypeError` になります。`allowReserved` はクエリパラメータにだけ適用されます。
 
 ### 認証
 
@@ -144,8 +154,9 @@ createApiClient({
 
 - 操作の `security`（OR-of-AND）を先頭から評価し、設定済みスキームで満たせる最初の代替を適用します。`{}`（任意認証）を含む操作は未設定なら認証なしで送信し、必須認証が満たせない場合は送信前に `AuthError` を投げます。
 - 認証は middleware チェーンの最内側（transport 直前）で適用されます。
-- OAuth2 トークンは期限の 30 秒前に先回りで更新され、同時更新は 1 回にまとめられ、401 を受けたら 1 回だけ強制更新して再送します。相対の `tokenUrl` は `baseUrl` に対して解決されます。
-- `http` の bearer / basic 以外や `mutualTLS` は生成時に警告となり、`createApiClient({ customAuth: (req, ctx) => { ... } })` で対応します。
+- OAuth2 トークンは期限の 30 秒前に先回りで更新され、同時更新は 1 回にまとめられ、401 を受けたら 1 回だけ強制更新して再送します。相対の `tokenUrl` / `refreshUrl` は（相対なら上記のとおり解決した）`baseUrl` に対して解決され、絶対 URL はそのまま使われます。解決できなければ `AuthError` です。
+- `http` の bearer / basic 以外（digest など）や `mutualTLS` は生成時に警告となり、`createApiClient({ customAuth: (req, ctx) => { ... } })` で対応します。`customAuth` を設定すると、これらのスキームは「設定済み」とみなされ（適用は `customAuth` の責任）、未設定なら `AuthError` になります。
+- 操作の `security` が `components.securitySchemes` に無いスキーム名を参照していると、生成時に `unknown-security-scheme` の警告が出ます。
 
 ### Middleware
 
@@ -194,6 +205,13 @@ body がストリームでリプレイ不可（`req.replayable === false`）の�
 Browser / Node.js 18+ / Bun / Deno / React Native / Cloudflare Workers（ESM のみ）。グローバルの `fetch` / `Request` / `Response` /
 `Headers` / `URL` / `FormData` / `Blob` / `AbortController` だけを使います。`createApiClient({ fetch })` で `fetch` を差し替えられます。
 利用側の tsconfig は `strict: true`, `target: ES2022`, `lib: ["ES2022", "DOM"]`, `module: "NodeNext"` を想定しています。
+
+### 既知の制約
+
+- 認証情報を持つリクエストのリダイレクトで資格情報を外す処理（§8.5）は、ブラウザ / React Native ではベストエフォートです（リダイレクトをプラットフォームが追従するため）。
+- `timeout` はレスポンスヘッダの到着までを対象にします。ヘッダ受信後に中断しても本文の読み込みはキャンセルされません。
+- TypeScript の判別可能 union で絞り込むには、spec 側で判別プロパティがリテラル（`const` / 単一値の `enum`）になっている必要があります。
+- middleware / オプション名は spec §6.2 の表記と異なります（`loggingMiddleware`、`retryMiddleware` の `baseDelayMs` など）。
 
 ## カスタムプラグイン
 
