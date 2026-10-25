@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TransportError } from '../src/errors.js';
 import { send, type FetchLike } from '../src/transport.js';
 import type { ApiRequest, HttpMethod } from '../src/types.js';
@@ -37,6 +37,7 @@ beforeAll(async () => {
     };
     if (req.url?.startsWith('/cross')) return redirect(302, `${b.origin}/echo?api_key=secret&keep=1`);
     if (req.url?.startsWith('/same')) return redirect(307, '/echo');
+    if (req.url?.startsWith('/found')) return redirect(302, '/echo');
     if (req.url?.startsWith('/see-other')) return redirect(303, '/echo');
     if (req.url?.startsWith('/loop')) return redirect(302, '/loop');
     return echo(req, res, body);
@@ -54,6 +55,19 @@ function request(method: HttpMethod, url: string, headers: Record<string, string
 }
 
 const credentials = { credentialHeaders: ['x-api-key'], credentialQuery: ['api_key'] };
+
+function recordingFetch() {
+  const redirects: (RequestRedirect | undefined)[] = [];
+  const recorded: FetchLike = (input, init) => {
+    redirects.push(init?.redirect);
+    return fetch(input, init);
+  };
+  return { fetch: recorded, redirects };
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('send', () => {
   it('manual redirect strips api key header on cross-origin hop', async () => {
@@ -119,5 +133,64 @@ describe('send', () => {
     expect(res.status).toBe(200);
     expect(seen).toHaveLength(1);
     expect(seen[0]?.redirect).toBe('follow');
+  });
+
+  it('manually strips Authorization on cross-origin hop', async () => {
+    const { fetch: recorded, redirects } = recordingFetch();
+    const res = await send(request('GET', `${a.origin}/cross`, { Authorization: 'Bearer secret' }), {
+      fetch: recorded,
+      ...credentials,
+    });
+    const echoed = (await res.json()) as { headers: Record<string, string> };
+    expect(redirects[0]).toBe('manual');
+    expect(echoed.headers['authorization']).toBeUndefined();
+  });
+
+  it('lets fetch follow redirects in browser-like environments', async () => {
+    vi.stubGlobal('WorkerGlobalScope', class {});
+    const { fetch: recorded, redirects } = recordingFetch();
+    await send(request('GET', `${a.origin}/same`, { 'X-API-Key': 'secret' }), { fetch: recorded, ...credentials });
+    expect(redirects).toEqual(['follow']);
+  });
+
+  it('returns the redirect when a non-replayable body would have to be re-sent', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('payload'));
+        controller.close();
+      },
+    });
+    const req: ApiRequest = {
+      method: 'PUT',
+      url: new URL(`${a.origin}/found`),
+      headers: new Headers({ 'X-API-Key': 'secret' }),
+      body: stream,
+      replayable: false,
+    };
+    const res = await send(req, { fetch: realFetch, ...credentials });
+    expect(res.status).toBe(302);
+  });
+
+  it('leaves no abort listener on the caller signal', async () => {
+    const controller = new AbortController();
+    const { signal } = controller;
+    let active = 0;
+    const add = signal.addEventListener.bind(signal);
+    const remove = signal.removeEventListener.bind(signal);
+    signal.addEventListener = ((...args: Parameters<AbortSignal['addEventListener']>) => {
+      active++;
+      add(...args);
+    }) as AbortSignal['addEventListener'];
+    signal.removeEventListener = ((...args: Parameters<AbortSignal['removeEventListener']>) => {
+      active--;
+      remove(...args);
+    }) as AbortSignal['removeEventListener'];
+
+    const fake: FetchLike = async () => new Response('ok');
+    const req = { ...request('GET', `${a.origin}/echo`, {}), signal };
+    await send(req, { fetch: fake, ...credentials });
+    expect(active).toBe(0);
+    await send(req, { fetch: fake, timeoutMs: 1000, ...credentials });
+    expect(active).toBe(0);
   });
 });

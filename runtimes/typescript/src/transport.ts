@@ -25,27 +25,41 @@ interface Hop {
 }
 
 function carriesCredentials(req: ApiRequest, opts: SendOptions): boolean {
-  if (req.headers.has('cookie')) return true;
+  if (req.headers.has('authorization') || req.headers.has('cookie')) return true;
   if (opts.credentialHeaders.some((name) => req.headers.has(name))) return true;
   return opts.credentialQuery.some((name) => req.url.searchParams.has(name));
 }
 
-/** Links the caller's signal and the timeout into one signal (no `AbortSignal.any` / `AbortSignal.timeout`). */
+/** Browsers and workers keep `redirect: 'follow'`: there fetch drops credentials itself and manual redirects are opaque. */
+function isBrowserLike(): boolean {
+  const scope = globalThis as { document?: unknown; WorkerGlobalScope?: unknown };
+  return typeof scope.document !== 'undefined' || typeof scope.WorkerGlobalScope !== 'undefined';
+}
+
+/**
+ * Links the caller's signal and the timeout into one signal (no `AbortSignal.any` / `AbortSignal.timeout`).
+ * Without a timeout the caller's signal is used directly; `clear()` detaches everything it attached.
+ */
 function linkSignals(signal: AbortSignal | undefined, timeoutMs: number | undefined) {
-  const controller = new AbortController();
   const state = { timedOut: false };
-  if (signal) {
-    if (signal.aborted) controller.abort(signal.reason);
-    else signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
-  }
-  const timer =
-    timeoutMs !== undefined && timeoutMs > 0
-      ? setTimeout(() => {
-          state.timedOut = true;
-          controller.abort();
-        }, timeoutMs)
-      : undefined;
-  return { signal: controller.signal, state, clear: () => clearTimeout(timer) };
+  if (timeoutMs === undefined || timeoutMs <= 0) return { signal, state, clear: () => {} };
+
+  const controller = new AbortController();
+  const onAbort = () => controller.abort(signal?.reason);
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener('abort', onAbort, { once: true });
+  const timer = setTimeout(() => {
+    state.timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  return {
+    signal: controller.signal,
+    state,
+    clear: () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    },
+  };
 }
 
 async function discard(response: Response): Promise<void> {
@@ -70,8 +84,9 @@ async function followManually(
     const location = response.headers.get('location');
     if (!REDIRECT_STATUSES.has(response.status) || location === null) return response;
 
-    const keepsBody = response.status === 307 || response.status === 308;
-    if (keepsBody && !req.replayable) return response;
+    // 303 (except HEAD) and 301/302 on POST switch to a bodiless GET; everything else re-sends the body.
+    const toGet = response.status === 303 ? hop.method !== 'HEAD' : response.status < 303 && hop.method === 'POST';
+    if (!toGet && hop.body !== null && !req.replayable) return response;
     if (redirects >= MAX_REDIRECTS) {
       await discard(response);
       throw new TransportError(`Too many redirects (more than ${MAX_REDIRECTS})`);
@@ -83,7 +98,7 @@ async function followManually(
       for (const name of [...opts.credentialHeaders, 'authorization', 'cookie']) hop.headers.delete(name);
       for (const name of opts.credentialQuery) next.searchParams.delete(name);
     }
-    if (response.status === 303 ? hop.method !== 'HEAD' : !keepsBody && hop.method === 'POST') {
+    if (toGet) {
       hop.method = 'GET';
       hop.body = null;
       for (const name of BODY_HEADERS) hop.headers.delete(name);
@@ -108,7 +123,7 @@ export async function send(req: ApiRequest, opts: SendOptions): Promise<Response
   };
 
   try {
-    if (typeof document === 'undefined' && carriesCredentials(req, opts)) {
+    if (!isBrowserLike() && carriesCredentials(req, opts)) {
       return await followManually(req, call, opts);
     }
     return await call({ method: req.method, url: req.url, headers: req.headers, body: req.body }, 'follow');
