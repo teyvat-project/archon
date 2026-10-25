@@ -28,6 +28,9 @@ import kotlin.time.Duration
  * [leewayMillis] (default 30 s) before they expire; concurrent requests for the same scopes share one token request,
  * which runs in the manager's own scope and so is not cancelled when one of the waiting callers is.
  *
+ * The token request (and [OAuth2RefreshToken.onRefreshed]) runs on a background dispatcher
+ * ([kotlinx.coroutines.Dispatchers.Default]), outside the caller's coroutine context.
+ *
  * @param tokenUrl The spec's token URL, used when the grant configures none.
  * @param baseUrl Relative token URLs resolve against it.
  */

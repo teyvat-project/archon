@@ -44,7 +44,11 @@ public class OAuth2RefreshToken(
     public val clientSecret: String? = null,
     public val tokenUrl: String? = null,
     public val clientAuth: OAuth2ClientAuth = OAuth2ClientAuth.Basic,
-    /** Called after every token response that carries a (rotated) refresh token. */
+    /**
+     * Called after every token response that carries a (rotated) refresh token. It runs inside the token fetch, which
+     * executes on a background dispatcher ([kotlinx.coroutines.Dispatchers.Default]) outside the caller's coroutine
+     * context, so it does not see the caller's context elements and is not cancelled with the caller.
+     */
     public val onRefreshed: (suspend (TokenSet) -> Unit)? = null,
 )
 
@@ -99,7 +103,7 @@ internal class AuthMiddleware(private val core: ApiClientCore) : Middleware {
 
     // Guarded by lock.
     private var managersFor: ManagersKey? = null
-    private var managers = HashMap<String, OAuth2TokenManager>()
+    private var managers = HashMap<String, Pair<OAuth2Value, OAuth2TokenManager>>()
 
     override suspend fun intercept(request: ApiRequest, next: suspend (ApiRequest) -> ApiResponse, context: CallContext): ApiResponse {
         val options = core.options
@@ -177,10 +181,13 @@ internal class AuthMiddleware(private val core: ApiClientCore) : Middleware {
                 managers = HashMap()
                 managersFor = ManagersKey(auth, options.baseUrl, http)
             }
-            return managers.getOrPut(scheme) {
-                val specUrl = (spec as? SecuritySchemeSpec.OAuth2)?.let { if (value.refreshToken != null) it.refreshUrl ?: it.tokenUrl else it.tokenUrl }
-                OAuth2TokenManager(http, value, specUrl, options.baseUrl, scheme, timeout = options.timeout)
-            }
+            // A scheme's value can be replaced on the same AuthConfig (settings are read on every request): a manager
+            // serves only the value it was built from.
+            managers[scheme]?.takeIf { it.first === value }?.let { return it.second }
+            val specUrl = (spec as? SecuritySchemeSpec.OAuth2)?.let { if (value.refreshToken != null) it.refreshUrl ?: it.tokenUrl else it.tokenUrl }
+            val manager = OAuth2TokenManager(http, value, specUrl, options.baseUrl, scheme, timeout = options.timeout)
+            managers[scheme] = value to manager
+            return manager
         }
     }
 

@@ -4,6 +4,8 @@ import archon.runtime.TestApi.op
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.http.HttpMethod
+import io.ktor.utils.io.ByteReadChannel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
 import org.junit.jupiter.api.AfterEach
@@ -166,6 +168,41 @@ class AuthTest {
             call(core, req("oauth"))
             assertEquals(2, issued.get())
             assertEquals("Bearer at2", server.last.header("authorization"))
+        }
+    }
+
+    @Test
+    fun recreatesTheManagerWhenTheSchemeValueIsReplaced() = runBlocking<Unit> {
+        TestServer.start {
+            if (it.target == "/oauth/token") TestResponse.json(200, "{\"access_token\":\"for-${it.header("authorization")}\"}") else TestResponse(200, "ok")
+        }.use { server ->
+            val values = mutableMapOf<String, Any?>("oauth" to OAuth2Value(clientCredentials = OAuth2ClientCredentials("a", "1")))
+            val core = core(server.url, values)
+            call(core, req("oauth"))
+            // Same AuthConfig object, different value for the scheme: the old identity's token must not be reused.
+            values["oauth"] = OAuth2Value(clientCredentials = OAuth2ClientCredentials("b", "2"))
+            call(core, req("oauth"))
+            val tokenRequests = server.requests.filter { it.target == "/oauth/token" }.map { it.header("authorization") }
+            assertEquals(listOf("Basic YTox", "Basic Yjoy"), tokenRequests)
+            assertEquals("Bearer for-Basic Yjoy", server.last.header("authorization"))
+        }
+    }
+
+    @Test
+    fun doesNotRetry401ForNonReplayableBody() = runBlocking<Unit> {
+        val issued = AtomicInteger()
+        TestServer.start {
+            if (it.target == "/oauth/token") TestResponse.json(200, "{\"access_token\":\"at${issued.incrementAndGet()}\"}") else TestResponse(401, "no")
+        }.use { server ->
+            val core = core(server.url, mapOf("oauth" to OAuth2Value(clientCredentials = OAuth2ClientCredentials("id", "secret"))))
+            val body = ChannelBody(ByteReadChannel("streamed".encodeToByteArray()), "application/octet-stream")
+            val operation = op("/x", method = HttpMethod.Post, body = BodyKind.Binary, responses = TestApi.text, security = listOf(req("oauth")))
+            val error = assertFailsWith<ApiException> {
+                core.send(operation, RequestValues().body(body), ResponseDecoder.text, ErrorDecoders.None, null)
+            }
+            assertEquals(401, error.statusCode)
+            assertEquals(1, issued.get())
+            assertEquals(listOf("streamed"), server.requests.filter { it.target == "/x" }.map { it.bodyText })
         }
     }
 
