@@ -197,6 +197,12 @@ describe('retryMiddleware', () => {
     expect(sleep).toHaveBeenCalledWith(200);
   });
 
+  it.each(['1.5', '-5', '0.5'])('falls back to backoff for non-integer, non-date Retry-After %s', async (value) => {
+    const sleep = vi.fn(async (_ms: number) => {});
+    await retryMiddleware({ sleep, ...noJitter })(makeReq(), sequence(res(429, { 'Retry-After': value }), res(200)), makeCtx());
+    expect(sleep).toHaveBeenCalledWith(200);
+  });
+
   it('does not retry POST by default', async () => {
     const sleep = vi.fn(async (_ms: number) => {});
     const next = sequence(res(503));
@@ -364,6 +370,21 @@ describe('retry401Middleware', () => {
     const second = await retry401Middleware({ onUnauthorized })(makeReq(), again, makeCtx());
     expect(second.status).toBe(401);
     expect(again).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels the 401 body when onUnauthorized throws', async () => {
+    const cancel = vi.fn(async () => {});
+    const unauthorized = res(401);
+    Object.defineProperty(unauthorized, 'body', { value: { cancel } });
+    const failure = new Error('refresh failed');
+    await expect(
+      retry401Middleware({
+        onUnauthorized: async () => {
+          throw failure;
+        },
+      })(makeReq(), sequence(unauthorized), makeCtx()),
+    ).rejects.toBe(failure);
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it('does not retry when onUnauthorized returns false or the request is not replayable', async () => {

@@ -44,6 +44,7 @@ function maskedUrl(url: URL, redactQuery: Set<string>): string {
 export function loggingMiddleware(
   opts: { logger?: Logger; level?: 'debug' | 'info'; redactHeaders?: string[]; redactQuery?: string[] } = {},
 ): Middleware {
+  // `console` is a deliberate exception to the allowed-globals list: it exists in every supported target.
   const logger = opts.logger ?? console;
   const level = opts.level ?? 'info';
   const lower = (names: string[] | undefined) => (names ?? []).map((n) => n.toLowerCase());
@@ -99,6 +100,8 @@ function parseRetryAfter(value: string | null): number | undefined {
   if (value === null) return undefined;
   const trimmed = value.trim();
   if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000;
+  // Date.parse is lenient ("1.5", "-5" parse as dates); only try it on something shaped like an HTTP-date.
+  if (!/[A-Za-z]{3}/.test(trimmed)) return undefined;
   const date = Date.parse(trimmed);
   return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
 }
@@ -175,13 +178,25 @@ export function retryMiddleware(
   };
 }
 
+/**
+ * Re-sends once after a 401 when `onUnauthorized` returns true (e.g. after rotating a static token).
+ * Managed OAuth2 tokens already force-refresh once on 401 inside the auth middleware, so `onUnauthorized`
+ * should return false (or this middleware should not be registered) for those schemes.
+ */
 export function retry401Middleware(opts: {
   onUnauthorized: (ctx: CallContext, response: Response) => boolean | Promise<boolean>;
 }): Middleware {
   return async (req, next, ctx) => {
     const response = await next(req);
     if (response.status !== 401 || !req.replayable) return response;
-    if (!(await opts.onUnauthorized(ctx, response))) return response;
+    let retry: boolean;
+    try {
+      retry = await opts.onUnauthorized(ctx, response);
+    } catch (error) {
+      await discard(response);
+      throw error;
+    }
+    if (!retry) return response;
     await discard(response);
     ctx.attempt++;
     return next(req);
