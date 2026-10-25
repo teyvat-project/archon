@@ -34,3 +34,49 @@ public sealed partial class RequestValues
         return this;
     }
 }
+
+public sealed partial class RequestValues
+{
+    /// <summary>Creates the body for the operation's media type; <c>null</c> when no body was set.</summary>
+    internal Func<string?, ApiBody>? BodyFactory { get; private set; }
+
+    public RequestValues JsonBody<T>(T value, JsonTypeInfo<T> info)
+    {
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(value, info);
+        BodyFactory = mediaType => new BytesBody(bytes, mediaType ?? "application/json");
+        return this;
+    }
+
+    /// <summary>An <c>application/x-www-form-urlencoded</c> body from the value's JSON properties.</summary>
+    public RequestValues FormBody<T>(T value, JsonTypeInfo<T> info)
+    {
+        var body = Runtime.FormBody.FromJson(JsonSerializer.SerializeToElement(value, info));
+        BodyFactory = _ => body;
+        return this;
+    }
+
+    public RequestValues TextBody(string value)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(value);
+        BodyFactory = mediaType => new BytesBody(bytes, mediaType ?? "text/plain");
+        return this;
+    }
+
+    /// <summary>A raw body; it is sent with the operation's media type.</summary>
+    public RequestValues BinaryBody(ApiFile file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        BodyFactory = mediaType => file.Bytes is not null
+            ? new BytesBody(file.Bytes, mediaType ?? file.ContentType ?? "application/octet-stream")
+            : new StreamBody(file.Stream!, mediaType ?? file.ContentType ?? "application/octet-stream");
+        return this;
+    }
+
+    /// <summary>A body built by hand (multipart, form, ...).</summary>
+    public RequestValues Body(ApiBody body)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        BodyFactory = _ => body;
+        return this;
+    }
+}
