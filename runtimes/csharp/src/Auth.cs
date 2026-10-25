@@ -1,11 +1,12 @@
+namespace Archon.Runtime;
+
+// Inside the namespace so these win over types of the generated SDK's root namespace (a model named Task, Type, ...).
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-
-namespace Archon.Runtime;
 
 /// <summary>A bearer token or API key: a fixed string or a provider called on every send.</summary>
 public sealed class TokenValue

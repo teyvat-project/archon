@@ -1,7 +1,8 @@
+namespace Archon.Runtime;
+
+// Inside the namespace so these win over types of the generated SDK's root namespace (a model named Task, Type, ...).
 using System.Collections.Generic;
 using System.Net.Http;
-
-namespace Archon.Runtime;
 
 /// <summary>Where a parameter is sent.</summary>
 public enum ParamLocation

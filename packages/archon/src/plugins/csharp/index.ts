@@ -86,7 +86,7 @@ export const csharp = definePlugin<CSharpPluginOptions, CSharpPluginAPI>({
       if (isDeclared(schema)) resolver.register(resolver.typeOf({ kind: 'ref', name: schemaName, nullable: false }, ['schemas', schemaName], 'model'));
     }
     for (const model of renderModels(ctx, names, resolver, plan)) ctx.emit(model.path, model.content);
-    const rendered = renderServices(ctx, ops, services, names, resolver);
+    const rendered = renderServices(ctx, ops, services, names, resolver, plan);
     for (const service of rendered.files) ctx.emit(service.path, service.content);
     ctx.emit(`${opts.clientName}.cs`, renderClient(ctx, namespace, [...services.values()]));
     ctx.emit('ApiAuth.cs', renderAuth(ctx, namespace));

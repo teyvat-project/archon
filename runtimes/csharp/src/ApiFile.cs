@@ -1,11 +1,12 @@
+namespace Archon.Runtime;
+
+// Inside the namespace so these win over types of the generated SDK's root namespace (a model named Task, Type, ...).
 using System;
 using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-
-namespace Archon.Runtime;
 
 /// <summary>
 /// File content for binary and multipart bodies. Byte arrays can be sent any number of times; a stream only once

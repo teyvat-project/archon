@@ -122,6 +122,28 @@ describe('csharp plugin: models', () => {
     expect(pet).toContain('return Pet.FromUnknown(element);');
   });
 
+  it('flattens a union variant that refers back to the union, so reading cannot recurse forever', async () => {
+    const { files } = await generate(doc({ U1: union([ref('U2'), str]), U2: union([ref('U1'), int]) }));
+    const u1 = file(files, 'Models/U1.cs');
+    expect(u1).not.toContain('typeof(U2)');
+    expect(u1).toContain('public string? String => _value as string;');
+    expect(u1).toContain('public int? Int => _value as int?;');
+    expect(file(files, 'Models/U2.cs')).not.toContain('typeof(U1)');
+  });
+
+  it('writes a derived variant before its polymorphic base', async () => {
+    const ir = shapes();
+    ir.schemas.set('Mixed', union([ref('Shape'), ref('Circle')]));
+    const { files } = await generate(ir);
+    const mixed = file(files, 'Models/Mixed.cs');
+    expect(mixed.indexOf('case Circle v:')).toBeGreaterThan(-1);
+    expect(mixed.indexOf('case Circle v:')).toBeLessThan(mixed.indexOf('case Shape v:'));
+    // a variant is written through its polymorphic base so the discriminator is kept
+    expect(squash(mixed)).toContain(
+      squash(`case Circle v: ${STJ}.JsonSerializer.Serialize<Shape>(writer, v, (${STJ}.Serialization.Metadata.JsonTypeInfo<Shape>)options.GetTypeInfo(typeof(Shape)));`),
+    );
+  });
+
   it('renders a union of string and object', async () => {
     const { files } = await generate(doc({ Site: union([str, obj([prop('url', str, true)])]) }));
     const site = file(files, 'Models/Site.cs');

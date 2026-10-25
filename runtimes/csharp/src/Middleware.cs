@@ -1,10 +1,11 @@
+namespace Archon.Runtime;
+
+// Inside the namespace so these win over types of the generated SDK's root namespace (a model named Task, Type, ...).
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-
-namespace Archon.Runtime;
 
 /// <summary>Sends the request to the rest of the chain (and finally the transport).</summary>
 public delegate Task<ApiResponse> ApiNext(ApiRequest request, CancellationToken cancellationToken);

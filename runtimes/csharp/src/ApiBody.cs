@@ -1,3 +1,6 @@
+namespace Archon.Runtime;
+
+// Inside the namespace so these win over types of the generated SDK's root namespace (a model named Task, Type, ...).
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -6,8 +9,6 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
-
-namespace Archon.Runtime;
 
 /// <summary>A request body. <see cref="CreateContent"/> is called once per send, so replayable bodies can be retried.</summary>
 public abstract class ApiBody

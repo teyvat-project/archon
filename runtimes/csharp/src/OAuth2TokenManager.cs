@@ -1,3 +1,6 @@
+namespace Archon.Runtime;
+
+// Inside the namespace so these win over types of the generated SDK's root namespace (a model named Task, Type, ...).
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -6,8 +9,6 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-
-namespace Archon.Runtime;
 
 /// <summary>
 /// Obtains and caches OAuth2 access tokens through the client-credentials or refresh-token grant. Tokens are renewed

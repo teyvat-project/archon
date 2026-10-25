@@ -167,6 +167,18 @@ describe('csharp plugin: services', () => {
     expect(diagnostics.entries.map((d) => d.code)).toContain('request-body-ignored');
   });
 
+  it('sends a polymorphic variant body through its base so the discriminator is written', async () => {
+    const ir = doc(
+      {
+        Shape: { kind: 'union', nullable: false, variants: [ref('Circle')], discriminator: { property: 'kind', mapping: new Map([['circle', 'Circle']]) } },
+        Circle: obj([prop('kind', { kind: 'const', value: 'circle', nullable: false }, true), prop('r', int, true)]),
+      },
+      [operation('POST /circles', 'postCircle', { requestBody: { required: true, contents: [json(ref('Circle'))] }, responses: [response(204)] })],
+    );
+    const { files } = await generate(ir);
+    expect(file(files, 'Services/DefaultService.cs')).toContain('.JsonBody<Shape>(body, ApiJsonContext.Default.Shape)');
+  });
+
   it('plugin include/exclude limits generated operations', async () => {
     const { files } = await generate(petstore(), { include: ['/^GET /pets/'], exclude: ['GET /pets/{petId}'] });
     const pets = file(files, 'Services/PetsService.cs');

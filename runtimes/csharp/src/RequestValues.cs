@@ -1,9 +1,10 @@
+namespace Archon.Runtime;
+
+// Inside the namespace so these win over types of the generated SDK's root namespace (a model named Task, Type, ...).
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
-
-namespace Archon.Runtime;
 
 /// <summary>
 /// The parameter values (and the body) of one call. Values are converted to JSON with their source-generated

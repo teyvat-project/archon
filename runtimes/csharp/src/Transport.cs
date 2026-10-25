@@ -1,3 +1,6 @@
+namespace Archon.Runtime;
+
+// Inside the namespace so these win over types of the generated SDK's root namespace (a model named Task, Type, ...).
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -5,8 +8,6 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-
-namespace Archon.Runtime;
 
 /// <summary>Names that carry credentials and must not cross origins.</summary>
 internal sealed record CredentialNames(IReadOnlyList<string> Headers, IReadOnlyList<string> Query);

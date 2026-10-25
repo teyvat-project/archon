@@ -1,8 +1,9 @@
+namespace Archon.Runtime;
+
+// Inside the namespace so these win over types of the generated SDK's root namespace (a model named Task, Type, ...).
 using System;
 using System.Linq;
 using System.Net.Http;
-
-namespace Archon.Runtime;
 
 /// <summary>A response travelling back through the middleware chain. Dispose responses you discard.</summary>
 public sealed class ApiResponse : IDisposable

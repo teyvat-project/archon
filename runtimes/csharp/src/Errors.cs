@@ -1,7 +1,8 @@
+namespace Archon.Runtime;
+
+// Inside the namespace so these win over types of the generated SDK's root namespace (a model named Task, Type, ...).
 using System;
 using System.Collections.Generic;
-
-namespace Archon.Runtime;
 
 /// <summary>A non-2xx response. <see cref="ApiException{TError}"/> carries the decoded error body.</summary>
 public class ApiException : Exception

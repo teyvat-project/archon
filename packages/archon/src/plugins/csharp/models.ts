@@ -79,7 +79,7 @@ export function renderModels(
     } else if (schema.kind === 'union') {
       const poly = plan.polymorphic.get(schemaName);
       if (poly) renderPolymorphicBase(w, typeName, poly, names);
-      else renderWrapper(w, schema as UnionSchema, typeName, path, names, resolver);
+      else renderWrapper(w, { schemaName, schema: schema as UnionSchema, typeName, path }, names, resolver, plan);
     }
     out.push({ path: `Models/${fileBaseName(typeName, ctx.options)}.cs`, content: w.toString() });
   }
@@ -203,11 +203,50 @@ function renderPolymorphicBase(w: CodeWriter, typeName: string, plan: { property
   });
 }
 
-function renderWrapper(w: CodeWriter, schema: UnionSchema, typeName: string, path: string[], names: CsNames, resolver: CsTypeResolver): void {
+/**
+ * The variants a wrapper reads. In an untagged union, a variant that is itself a wrapper union leading back to this
+ * one (`U1 = U2 | string`, `U2 = U1 | int`) would make the converters call each other on the same JSON forever, so
+ * such a variant is replaced by its own variants (recursively, skipping the cycle).
+ */
+function wrapperVariants(schemaName: string, schema: UnionSchema, resolver: CsTypeResolver, plan: UnionPlan): IRSchema[] {
+  if (schema.discriminator) return schema.variants;
+  const wrapper = (s: IRSchema): UnionSchema | undefined => {
+    if (s.kind !== 'ref' || plan.polymorphic.has(s.name)) return undefined;
+    const target = resolver.schema(s.name);
+    return target?.kind === 'union' && !target.discriminator ? target : undefined;
+  };
+  const reaches = (from: string, seen: Set<string>): boolean => {
+    if (seen.has(from)) return false;
+    seen.add(from);
+    for (const v of wrapper({ kind: 'ref', name: from, nullable: false })?.variants ?? []) {
+      if (v.kind !== 'ref' || !wrapper(v)) continue;
+      if (v.name === schemaName || reaches(v.name, seen)) return true;
+    }
+    return false;
+  };
+  const expand = (variants: IRSchema[], visited: Set<string>): IRSchema[] =>
+    variants.flatMap((v) => {
+      const inner = wrapper(v);
+      if (v.kind !== 'ref' || inner === undefined) return [v];
+      if (v.name === schemaName || visited.has(v.name)) return [];
+      if (!reaches(v.name, new Set())) return [v];
+      return expand(inner.variants, new Set(visited).add(v.name));
+    });
+  return expand(schema.variants, new Set([schemaName]));
+}
+
+function renderWrapper(
+  w: CodeWriter,
+  u: { schemaName: string; schema: UnionSchema; typeName: string; path: string[] },
+  names: CsNames,
+  resolver: CsTypeResolver,
+  plan: UnionPlan,
+): void {
+  const { schema, typeName, path } = u;
   const accessors = new UniqueNamer(['Value', 'Unknown', 'FromUnknown', 'Equals', 'GetHashCode', 'ToString', 'GetType', typeName]);
   const seen = new Set<string>();
   const variants: { type: CsType; accessor: string; schema: IRSchema }[] = [];
-  schema.variants.forEach((variant, i) => {
+  wrapperVariants(u.schemaName, schema, resolver, plan).forEach((variant, i) => {
     const type = resolver.typeOf(variant, [...path, 'variants', String(i)], 'model');
     if (type.code === typeName || seen.has(type.code)) return;
     seen.add(type.code);
@@ -287,10 +326,20 @@ function renderWrapper(w: CodeWriter, schema: UnionSchema, typeName: string, pat
     });
     w.blank();
     block(w, `public override void Write(${STJ}.Utf8JsonWriter writer, ${typeName} value, ${STJ}.JsonSerializerOptions options)`, () => {
+      // A derived polymorphic variant must be matched before its base.
+      const variantNames = new Set(variants.flatMap((v) => (v.schema.kind === 'ref' ? [v.schema.name] : [])));
+      const derivedFirst = [...variants].sort((a, b) => Number(isDerivedOf(b.schema, variantNames, plan)) - Number(isDerivedOf(a.schema, variantNames, plan)));
       block(w, 'switch (value.Value)', () => {
-        for (const v of variants) {
+        for (const v of derivedFirst) {
+          // A polymorphic variant goes through its base, which writes the discriminator.
+          const base = v.schema.kind === 'ref' ? plan.baseOf.get(v.schema.name) : undefined;
+          const via = base === undefined ? undefined : resolver.typeOf({ kind: 'ref', name: base, nullable: false }, ['schemas', base], 'model');
           w.line(`case ${v.type.code} v:`);
-          w.line(`    ${STJ}.JsonSerializer.Serialize(writer, v, ${info(v.type)});`);
+          w.line(
+            via === undefined
+              ? `    ${STJ}.JsonSerializer.Serialize(writer, v, ${info(v.type)});`
+              : `    ${STJ}.JsonSerializer.Serialize<${via.code}>(writer, v, ${info(via)});`,
+          );
           w.line('    return;');
         }
       });
@@ -298,4 +347,10 @@ function renderWrapper(w: CodeWriter, schema: UnionSchema, typeName: string, pat
       w.line('else writer.WriteNullValue();');
     });
   });
+}
+
+function isDerivedOf(schema: IRSchema, variantNames: ReadonlySet<string>, plan: UnionPlan): boolean {
+  if (schema.kind !== 'ref') return false;
+  const base = plan.baseOf.get(schema.name);
+  return base !== undefined && variantNames.has(base);
 }

@@ -1,9 +1,10 @@
+namespace Archon.Runtime;
+
+// Inside the namespace so these win over types of the generated SDK's root namespace (a model named Task, Type, ...).
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
-
-namespace Archon.Runtime;
 
 /// <summary>Creates URIs whose path and query are kept byte for byte (no unescaping or re-escaping).</summary>
 public static class ApiUrl

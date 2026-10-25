@@ -8,13 +8,46 @@ import { generate } from '../../src/generate.js';
 import type { FiltersConfig } from '../../src/passes/filters.js';
 import type { DeepPartial } from '../../src/plugin/define.js';
 import { csharp, type CSharpPluginOptions } from '../../src/plugins.js';
+import type { OpenAPIDocument } from '../../src/loader/load.js';
 
 const specs = fileURLToPath(new URL('../../../../fixtures/specs/', import.meta.url));
 const hasDotnet = spawnSync('dotnet', ['--version'], { stdio: 'ignore' }).status === 0;
 
-type Case = { name: string; spec: string; options?: DeepPartial<CSharpPluginOptions>; filters?: FiltersConfig };
+type Case = { name: string; spec: string | OpenAPIDocument; options?: DeepPartial<CSharpPluginOptions>; filters?: FiltersConfig };
+
+const obj = (props: Record<string, unknown>, required: string[] = []) => ({ type: 'object', properties: props, required });
+const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
+
+/** Schemas named after BCL types the runtime uses, unions referring to each other, and polymorphic variants used directly. */
+const stress: OpenAPIDocument = {
+  openapi: '3.1.0',
+  info: { title: 'Stress', version: '1.0.0' },
+  servers: [{ url: 'https://api.test' }],
+  paths: {
+    '/things': {
+      post: {
+        operationId: 'postThings',
+        requestBody: { required: true, content: { 'application/json': { schema: ref('Circle') } } },
+        responses: { '200': { description: 'ok', content: { 'application/json': { schema: ref('Holder') } } } },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      ...Object.fromEntries(['Task', 'Type', 'Exception', 'Uri', 'Encoding', 'Stream', 'Random', 'Version', 'Action'].map((n) => [n, obj({ a: { type: 'string' } })])),
+      U1: { oneOf: [ref('U2'), { type: 'string' }] },
+      U2: { oneOf: [ref('U1'), { type: 'integer' }] },
+      Shape: { oneOf: [ref('Circle'), ref('Square')], discriminator: { propertyName: 'kind' } },
+      Circle: obj({ kind: { const: 'Circle' }, r: { type: 'number' } }, ['kind', 'r']),
+      Square: obj({ kind: { const: 'Square' }, s: { type: 'number' } }, ['kind', 's']),
+      Mixed: { oneOf: [ref('Shape'), ref('Circle')] },
+      Holder: obj({ task: ref('Task'), type: ref('Type'), u: ref('U1'), m: ref('Mixed') }),
+    },
+  },
+};
 
 const cases: Case[] = [
+  { name: 'stress (BCL-named schemas, cyclic and mixed unions)', spec: stress },
   { name: 'petstore', spec: 'petstore.yaml' },
   { name: 'edge-cases', spec: 'edge-cases.yaml' },
   { name: 'natsuneko (defaults)', spec: 'natsuneko.json' },
@@ -42,7 +75,7 @@ describe.skipIf(!hasDotnet).sequential('compile: generated C# SDK builds with do
     try {
       await generate(
         {
-          input: join(specs, spec),
+          input: typeof spec === 'string' ? join(specs, spec) : spec,
           output: join(dir, 'out'),
           ...(filters && { parser: { filters } }),
           plugins: [csharp({ output: '.', ...options })],

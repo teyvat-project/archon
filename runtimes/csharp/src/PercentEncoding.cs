@@ -1,7 +1,8 @@
+namespace Archon.Runtime;
+
+// Inside the namespace so these win over types of the generated SDK's root namespace (a model named Task, Type, ...).
 using System;
 using System.Text;
-
-namespace Archon.Runtime;
 
 /// <summary>Percent-encoding that matches JavaScript's <c>encodeURIComponent</c> and <c>URLSearchParams</c> byte for byte.</summary>
 internal static class PercentEncoding

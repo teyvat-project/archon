@@ -266,7 +266,7 @@ var result = await client.Catalyst.GetCatalystV1StatusByIdWithResponseAsync("123
 型の対応: `date-time` → `DateTimeOffset`、`date` → `DateOnly`、`uuid` → `Guid`、`int64` → `long`（format 無しの integer は `int`）、`binary` → `ApiFile`（`byte[]` または `Stream` + ファイル名）、未知の schema → `JsonElement`、必須プロパティは `required`、任意 / nullable は `T?`。
 
 - **enum** は未知の値を保持する構造体です（`Status.Active`、`status.Value`、`status.IsKnown`）。`switch` は `status.Value` か `==` で比較します。
-- **判別あり union** は `[JsonPolymorphic]` 基底クラス + 派生クラスです（`shape is Circle c`）。未知の判別値は基底型そのもののインスタンスになり、他のプロパティは `AdditionalProperties` に入ります（判別値そのものは System.Text.Json の制約で保持されません）。バリアントが複数の union に属するなど基底クラスにできない場合と、**判別なし union** は、`Value` / バリアントごとのアクセサ（`pet.Cat`）/ `Unknown`（生 JSON）を持つラッパークラスになり、バリアントを宣言順に試して最初に読めたものを採用します。
+- **判別あり union** は `[JsonPolymorphic]` 基底クラス + 派生クラスです（`shape is Circle c`）。未知の判別値は基底型そのもののインスタンスになり、他のプロパティは `AdditionalProperties` に入ります（判別値そのものは System.Text.Json の制約で保持されません）。バリアント型（`Circle`）を宣言したリクエストボディは基底型経由で直列化するので判別プロパティも送られますが、モデルのプロパティがバリアント型で宣言されている場合は判別プロパティが出力されません。バリアントが複数の union に属するなど基底クラスにできない場合と、**判別なし union** は、`Value` / バリアントごとのアクセサ（`pet.Cat`）/ `Unknown`（生 JSON）を持つラッパークラスになり、バリアントを宣言順に試して最初に読めたものを採用します。
 - 任意プロパティの `null` は送信しません（「未設定」と「null」の区別はスコープ外）。空の JSON 応答（204 など）は `null`（`default`）を返します。
 
 ## カスタムプラグイン

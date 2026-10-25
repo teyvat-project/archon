@@ -6,7 +6,7 @@ import { applyTemplate, toCase, UniqueNamer } from '../../writer/naming.js';
 import { block, csFile, escapeXml, G, GEN, literal, summary } from './emit.js';
 import type { CSharpPluginOptions } from './index.js';
 import { JSON_CONTEXT } from './json-context.js';
-import { isFileType } from './models.js';
+import { isFileType, type UnionPlan } from './models.js';
 import { csIdentifier, escapeKeyword, sanitize, type CsNames } from './names.js';
 import { RESERVED_MEMBERS } from './reserved.js';
 import type { CsType, CsTypeResolver } from './types.js';
@@ -67,6 +67,7 @@ export function renderServices(
   services: Map<string, ServiceName>,
   names: CsNames,
   resolver: CsTypeResolver,
+  plan: UnionPlan,
 ): { files: { path: string; content: string }[]; operations: Map<string, OperationNames & ServiceName> } {
   const files: { path: string; content: string }[] = [];
   const operations = new Map<string, OperationNames & ServiceName>();
@@ -83,7 +84,7 @@ export function renderServices(
       for (const op of members) {
         const opNames = operationNames(op, ctx.options, memberNames);
         operations.set(op.id, { ...opNames, ...service });
-        renderOperation(ctx, w, op, opNames, names, resolver);
+        renderOperation(ctx, w, op, opNames, names, resolver, plan);
       }
     });
     files.push({ path: `Services/${service.className}.cs`, content: w.toString() });
@@ -103,7 +104,15 @@ function operationNames(op: IROperation, opts: CSharpPluginOptions, namer: Uniqu
   };
 }
 
-function renderOperation(ctx: PluginContext<CSharpPluginOptions>, w: CodeWriter, op: IROperation, n: OperationNames, names: CsNames, resolver: CsTypeResolver): void {
+function renderOperation(
+  ctx: PluginContext<CSharpPluginOptions>,
+  w: CodeWriter,
+  op: IROperation,
+  n: OperationNames,
+  names: CsNames,
+  resolver: CsTypeResolver,
+  plan: UnionPlan,
+): void {
   const path = ['operations', op.id];
   const argNames = new UniqueNamer(['requestOptions', 'cancellationToken', 'values', 'body']);
   const params: Param[] = op.parameters.map((p) => {
@@ -171,7 +180,7 @@ function renderOperation(ctx: PluginContext<CSharpPluginOptions>, w: CodeWriter,
       const info = resolver.register(p.type, p.nullable);
       return `.${PARAM_IN[p.ir.in]}(${literal(p.ir.name)}, ${p.name}, ${JSON_CONTEXT}.Default.${info})`;
     });
-    const bodyCall = body ? bodyExpression(body, names, resolver) : undefined;
+    const bodyCall = body ? bodyExpression(body, names, resolver, plan) : undefined;
     if (bodyCall && body?.required) chain.push(bodyCall);
     if (chain.length === 0) {
       w.line('var values = new RequestValues();');
@@ -211,17 +220,25 @@ function objectSchemaName(schema: IRSchema, resolver: CsTypeResolver): string | 
   return schema.kind === 'ref' && resolver.declares(schema.name) && resolver.schema(schema.name)?.kind === 'object' ? schema.name : undefined;
 }
 
-function bodyExpression(body: Body, names: CsNames, resolver: CsTypeResolver): string {
+function bodyExpression(body: Body, names: CsNames, resolver: CsTypeResolver, plan: UnionPlan): string {
+  // A polymorphic variant written with its own type info would leave out the discriminator, so it goes through the base.
+  const schema = body.media.schema;
+  const base = schema.kind === 'ref' ? plan.baseOf.get(schema.name) : undefined;
+  const through = (method: string) => {
+    if (base === undefined) return `.${method}(body, ${JSON_CONTEXT}.Default.${resolver.register(body.type, body.nullable)})`;
+    const baseType = resolver.typeOf({ kind: 'ref', name: base, nullable: false }, ['schemas', base], 'model');
+    return `.${method}<${baseType.code}>(body, ${JSON_CONTEXT}.Default.${resolver.register(baseType)})`;
+  };
   switch (body.media.kind) {
     case 'json':
-      return `.JsonBody(body, ${JSON_CONTEXT}.Default.${resolver.register(body.type, body.nullable)})`;
+      return through('JsonBody');
     case 'text':
       return '.TextBody(body)';
     case 'binary':
       return '.BinaryBody(body)';
     case 'form': {
       if (body.type.code === 'FormBody') return '.Body(body)';
-      return `.FormBody(body, ${JSON_CONTEXT}.Default.${resolver.register(body.type, body.nullable)})`;
+      return through('FormBody');
     }
     case 'multipart': {
       const schemaName = objectSchemaName(body.media.schema, resolver);

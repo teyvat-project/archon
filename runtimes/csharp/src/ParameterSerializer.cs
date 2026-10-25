@@ -1,11 +1,12 @@
+namespace Archon.Runtime;
+
+// Inside the namespace so these win over types of the generated SDK's root namespace (a model named Task, Type, ...).
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-
-namespace Archon.Runtime;
 
 /// <summary>OpenAPI <c>style</c> / <c>explode</c> serialization (RFC 6570), matching the TypeScript runtime.</summary>
 internal static partial class ParameterSerializer
