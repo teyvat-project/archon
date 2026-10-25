@@ -20,3 +20,5 @@ e2e/swift/generated/
 **/target/
 e2e/rust/generated/
 e2e/go/generated/
+packages/archon/README.md
+packages/archon/LICENSE

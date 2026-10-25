@@ -1,6 +1,30 @@
 {
   "name": "@natsuneko-laboratory/archon",
   "version": "0.1.0",
+  "description": "Generate SDKs with minimal dependencies for TypeScript, C#, Kotlin, Swift, Rust and Go from OpenAPI 3.0 / 3.1 specs",
+  "keywords": [
+    "openapi",
+    "swagger",
+    "sdk",
+    "codegen",
+    "generator",
+    "typescript",
+    "csharp",
+    "kotlin",
+    "swift",
+    "rust",
+    "go"
+  ],
+  "license": "MIT",
+  "homepage":"https://github.com/teyvat-project/Archon#readme",
+  "bugs": {
+    "url": "https://github.com/teyvat-project/Archon/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/teyvat-project/Archon.git",
+    "directory": "packages/archon"
+  },
   "type": "module",
   "bin": {
     "archon": "./dist/cli.js"
@@ -21,7 +45,7 @@
   ],
   "scripts": {
     "build": "node scripts/copy-runtimes.mjs && tsdown",
-    "prepack": "pnpm run build",
+    "prepack": "node scripts/copy-package-files.mjs && pnpm run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p ."
   },
