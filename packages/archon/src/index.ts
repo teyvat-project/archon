@@ -4,3 +4,5 @@ export type * from './ir/types.js';
 export type { SchemaPath } from './ir/walk.js';
 export { ArchonError, Diagnostics } from './diagnostics.js';
 export type { Diagnostic } from './diagnostics.js';
+export { parseDocument } from './parser/index.js';
+export type { ParserHooks } from './parser/index.js';

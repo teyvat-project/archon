@@ -98,7 +98,7 @@ function refSiblings(node: Obj): Obj {
   return out;
 }
 
-function resolvePointer(doc: OpenAPIDocument, ref: string): unknown {
+export function resolvePointer(doc: OpenAPIDocument, ref: string): unknown {
   let cur: unknown = doc;
   for (const raw of ref.slice(2).split('/')) {
     if (!isRecord(cur) && !Array.isArray(cur)) return undefined;
@@ -365,7 +365,7 @@ function isNumber(v: unknown): v is number {
   return typeof v === 'number';
 }
 
-function escapePointer(segment: string): string {
+export function escapePointer(segment: string): string {
   return segment.replace(/~/g, '~0').replace(/\//g, '~1');
 }
 
