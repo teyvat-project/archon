@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { Diagnostic } from '../../src/diagnostics.js';
 import { generate } from '../../src/generate.js';
-import { csharp, kotlin, typescript } from '../../src/plugins.js';
+import { csharp, kotlin, swift, typescript } from '../../src/plugins.js';
 
 const specs = fileURLToPath(new URL('../../../../fixtures/specs/', import.meta.url));
 
@@ -90,6 +90,34 @@ describe.each(['petstore', 'edge-cases'])('snapshot (kotlin): %s', (spec) => {
       for (const file of files) {
         const content = await readFile(join(out, file), 'utf8');
         await expect(content).toMatchFileSnapshot(`__snapshots__/kotlin/${spec}/${file}`);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe.each(['petstore', 'edge-cases'])('snapshot (swift): %s', (spec) => {
+  it('matches the Swift output snapshots', async () => {
+    const dir = await mkdtemp(join(tmpdir(), `archon-snapshot-swift-${spec}-`));
+    try {
+      const diagnostics: Diagnostic[] = [];
+      const out = join(dir, 'out');
+      const result = await generate(
+        { input: join(specs, `${spec}.yaml`), output: out, plugins: [swift({ output: '.' })] },
+        { cwd: dir, logger: (d) => diagnostics.push(d) },
+      );
+      expect(diagnostics.filter((d) => d.level !== 'info')).toEqual([]);
+
+      // Sources/<Module>Core/ is the runtime copy, covered by plugins/swift/client.test.ts.
+      const files = (result.jobs[0]?.files ?? [])
+        .map((f) => relative(out, f).split('\\').join('/'))
+        .filter((f) => !/^Sources\/[^/]+Core\//.test(f))
+        .sort();
+      expect(files.length).toBeGreaterThan(0);
+      for (const file of files) {
+        const content = await readFile(join(out, file), 'utf8');
+        await expect(content).toMatchFileSnapshot(`__snapshots__/swift/${spec}/${file}`);
       }
     } finally {
       await rm(dir, { recursive: true, force: true });

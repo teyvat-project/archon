@@ -3,9 +3,9 @@
 OpenAPI 3.0 / 3.1 の仕様から、**外部依存を最小化した** SDK を生成するジェネレータ（Meta SDK）です。
 設計の詳細は [`docs/superpowers/specs/2026-10-25-archon-design.md`](docs/superpowers/specs/2026-10-25-archon-design.md) を参照してください。
 
-現在は **M3（コア + TypeScript / C# / Kotlin プラグイン）** まで実装済みです。生成される SDK の依存は最小限（TypeScript は `fetch` のみ、
-C# は BCL のみ、Kotlin は `ktor-client-core` と `kotlinx-serialization-json` のみ）で、手書きのランタイムは生成物の `core/`
-（C# は `Core/`）にそのままコピーされます。
+現在は **M1〜M4（コア + TypeScript / C# / Kotlin / Swift プラグイン）** まで実装済みです。生成される SDK の依存は最小限（TypeScript は `fetch` のみ、
+C# は BCL のみ、Kotlin は `ktor-client-core` と `kotlinx-serialization-json` のみ、Swift は Foundation のみ）で、手書きのランタイムは生成物の `core/`
+（C# は `Core/`、Swift は `Sources/<Module>Core/`）にそのままコピーされます。
 
 ## インストール
 
@@ -337,6 +337,58 @@ client.close()  // SDK が作った HttpClient だけを閉じる
 
 生成した SDK は利用者の Gradle でビルドします。このリポジトリでは `runtimes/kotlin/gradlew -p <出力先> build` で試せます。
 
+## 生成された Swift SDK の使い方
+
+Swift 6（tools-version 6.0、Swift 6 言語モード）向けの SwiftPM パッケージで、依存は Foundation のみです（Linux では `FoundationNetworking`）。
+macOS 12 / iOS 15 / tvOS 15 / watchOS 8 / visionOS 1 以降と Linux で動きます。公開型はすべて `Sendable` です。
+
+```
+swift/
+  Package.swift                          # package: false なら出力しない
+  Sources/<Module>/ApiClient.swift        # ApiClient
+  Sources/<Module>/ApiAuth.swift          # スキーム名ごとの型付き認証設定
+  Sources/<Module>/Exports.swift          # @_exported import <Module>Core（ランタイムの型も import <Module> で使える）
+  Sources/<Module>/Models/*.swift         # schema ごとに 1 ファイル（inline の object / enum / union は {Parent}{Prop} で巻き上げ）
+  Sources/<Module>/Services/<Group>Service.swift
+  Sources/<Module>Core/*.swift            # ランタイム（runtimes/swift/src のコピー）。別ターゲットなのでモデル名と衝突しない
+```
+
+モジュール名は既定で `info.title` の PascalCase です（`swift({ moduleName: 'NatsunekoApi' })` で変更）。生成先をパスで依存に加えます。
+
+```swift
+// Package.swift
+.package(path: "sdk/swift"),
+// ターゲットの dependencies
+.product(name: "NatsunekoApi", package: "swift"),
+```
+
+```swift
+import NatsunekoApi
+
+let client = ApiClient(
+    baseUrl: "https://api.natsuneko.com",   // 既定は servers[0]（ApiClient.defaultBaseUrl）
+    auth: ApiAuth(bearerAuth: "token"),     // 文字列、または TokenValue(provider: { ... })
+    timeout: 30,
+    middleware: [RetryMiddleware(), UserAgentMiddleware("my-app/1.0")]
+)
+
+let status = try await client.catalyst.getCatalystV1StatusById(id: "123")             // 成功ボディを返す
+let result = try await client.catalyst.getCatalystV1StatusByIdWithResponse(id: "123")  // statusCode / headers / url / data
+```
+
+- 引数ラベルはパラメータ名の camelCase で、順序は path → 必須 `body:` → 必須 query / header / cookie → 任意（`= nil`）→ `options: RequestOptions?`。
+- 非 2xx は `ApiError` を throw します（`statusCode` / `headers` / `url` / `rawBody`）。そのステータスで宣言された型のボディは `error.body(as: NotFoundError.self)` で取り出します（`404` → `4XX` → `default` の順に探し、デコードできなければ `nil`）。通信失敗・タイムアウトは `TransportError`（`timedOut`）、2xx ボディのデコード失敗は `DecodeError`（`rawBody`）、必須認証の未設定は送信前に `AuthError`（`schemes`）、パスパラメータの欠落などは `ArgumentError`。呼び出し側の Task キャンセルは `CancellationError` です。
+- 認証は `ApiAuth` のプロパティ（スキーム名の camelCase）に設定します: bearer / apiKey は `TokenValue`、basic は `BasicValue`、OAuth2 / OpenID Connect は `OAuth2Value(accessToken:clientCredentials:refreshToken:)`。トークンの先回り更新・single-flight（actor）・401 での 1 回の再送は TypeScript / C# と同じです。未対応スキームは `customAuth: { request, context in ... }` で扱います。
+- Middleware は `Middleware` プロトコル（`intercept(_:context:next:)`）か `ClosureMiddleware { request, context, next in ... }` で作り、`middleware:` に渡すか `client.use(...)` で追加します。標準: `LoggingMiddleware`（資格情報をマスク）/ `UserAgentMiddleware` / `RetryMiddleware(RetryOptions)` / `Retry401Middleware`。
+- 送信は `HTTPTransport`（既定は Cookie・キャッシュ無効で自動リダイレクトしない `URLSessionTransport`）です。独自の `URLSession` を使うときは `URLSessionTransport(session:)` に、リダイレクトを追わない（`willPerformHTTPRedirection` で `nil` を返す）デリゲートを持つセッションを渡してください。リダイレクトはランタイムが手動で追い、別オリジンへ移るときは `Authorization` / `Cookie` / API キーを外します。
+
+型の対応: `date-time` → `Date`（RFC 3339、小数秒とオフセット対応）、`date` → `CalendarDate`（ランタイムの年月日型）、`uuid` → `UUID`、`int64` → `Int64`（`int32` は `Int32`、format 無しは `Int`）、`byte` → `Data`、`binary` → `ApiFile`（`Data` + ファイル名 + Content-Type。リクエスト / レスポンスの binary body は `Data`）、未知の schema → `JSONValue`、任意 / nullable は `T?`。モデルは `Codable, Hashable, Sendable` の struct で、全プロパティを引数に取るイニシャライザを持ちます。
+
+- **enum** は既知値の case と `unknown(String)`（数値 enum は `unknown(Int)` / `unknown(Double)`）を持ち、`rawValue` / `isKnown` / `allCases` を提供します。整数値の case は `_1` のようになります。
+- **union** は関連値付きの `indirect enum` です（`case .circle(let c)`）。判別ありは判別値で、判別なしは宣言順に試して最初に読めたバリアントになり、どれにも当てはまらなければ `unknown(JSONValue)` で生 JSON を保持します。判別プロパティはバリアントの struct に残り、`const` / 単一値 enum ならイニシャライザの既定値になります（`Circle(radius: 1)`）。
+- 値型が自分自身を値で含む循環（`Node.parent: Node?`、`A.b` ↔ `B.a`）は、該当プロパティをランタイムの `Indirect` に格納します（公開されるのは通常のプロパティです）。
+- 他言語との意図的な差分: Foundation の `URL` が受け付けない `|` `[` `]` は path / query で常に percent-encode します（`piped=1%7C2`、`filter%5Bstatus%5D=active`。サーバーでデコードした値は同じ）。空の JSON 応答（204 など）は戻り値型が Optional なら `nil`、そうでなければ `DecodeError` です。JSON の直列化はキー順を宣言順に保つためランタイムの `JSONValueEncoder` / `ApiJSON` を使い（`JSONEncoder` はキー順を保持しません）、デコードは `JSONDecoder` です。
+
 ## カスタムプラグイン
 
 `definePlugin` で作ります。依存プラグイン（ここでは `typescript`）の公開 API `symbols` から、生成済みの型名・関数名を参照できます。
@@ -377,7 +429,7 @@ export default defineConfig({
 | M1 | コア（loader / parser / IR / passes / 設定 / プラグイン API / CLI / CodeWriter）+ TypeScript プラグイン & ランタイム + モックサーバ + E2E 基盤 | 実装済み |
 | M2 | C#（.NET 10）プラグイン & BCL のみのランタイム | 実装済み |
 | M3 | Kotlin（JVM 11+ / Android）プラグイン & ktor-client-core + kotlinx-serialization-json のみのランタイム | 実装済み |
-| M4 | Swift 6 | 未着手 |
+| M4 | Swift 6 プラグイン & Foundation のみのランタイム（Apple プラットフォーム / Linux） | 実装済み |
 | M5 | Rust | 未着手 |
 | M6 | Go 1.22+ | 未着手 |
 | M7 | Ruby 3.2+ | 未着手 |
@@ -394,6 +446,8 @@ pnpm test:e2e:csharp   # 同じシナリオを生成 C# SDK で実行する E2E�
 dotnet test runtimes/csharp/tests/Archon.Runtime.Tests   # C# ランタイムの単体テスト
 pnpm test:e2e:kotlin   # 同じシナリオを生成 Kotlin SDK で実行する E2E（e2e/kotlin、要 JDK 17+）
 runtimes/kotlin/gradlew -p runtimes/kotlin test   # Kotlin ランタイムの単体テスト（Gradle wrapper 同梱）
+pnpm test:e2e:swift    # 同じシナリオを生成 Swift SDK で実行する E2E（e2e/swift、要 Swift 6.1+）
+swift test --package-path runtimes/swift                 # Swift ランタイムの単体テスト（swift-testing）
 pnpm build       # 全パッケージのビルド
 pnpm -F @natsuneko-laboratory/archon-e2e-typescript smoke bun   # 生成 SDK を Bun / Deno（`smoke deno`）でモックサーバに対して実行
 ```
@@ -402,6 +456,7 @@ CI（`.github/workflows/ci.yml`）は上記に加え、ランタイムの単体�
 
 C# 生成物のコンパイルテスト（`dotnet build -warnaserror`）は .NET 10 以降の SDK が無ければスキップされます（CI では `actions/setup-dotnet` で入れて実行します）。
 Kotlin 生成物のコンパイルテスト（`gradle build`、警告をエラー扱い）は JDK 17 以降が無ければスキップされます（CI では `actions/setup-java` で入れて実行します）。
+Swift 生成物のコンパイルテスト（`swift build -Xswiftc -warnings-as-errors`）は Swift 6 以降が無ければスキップされます。Swift のランタイム単体テストと E2E は、CI で Linux（`swift:6.2` コンテナ）と macOS の両方で実行します。
 
 ### ライブスモーク（手動）
 

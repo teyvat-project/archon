@@ -28,7 +28,8 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # The C#, Kotlin and Swift compile tests build several generated SDKs.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -47,6 +48,9 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v6
+      # The `swift build -warnings-as-errors` compile tests of the Swift output run with the runner's toolchain
+      # (Xcode on macOS) and are skipped where there is no Swift 6.
+      - run: swift --version || true
       - run: pnpm test
 
   build:
@@ -65,11 +69,14 @@ jobs:
             const paths = files.map((f) => f.path);
             const required = ["dist/cli.js", "dist/index.js", "dist/index.d.ts", "dist/plugins.js", "dist/plugins.d.ts"];
             const missing = required.filter((p) => !paths.includes(p));
-            for (const lang of ["typescript", "csharp", "kotlin"]) {
+            for (const lang of ["typescript", "csharp", "kotlin", "swift"]) {
               if (!paths.some((p) => p.startsWith(`runtimes/${lang}/`))) missing.push(`runtimes/${lang}/**`);
             }
             const leaked = paths.filter(
-              (p) => /^runtimes\/csharp\/.*(\.csproj$|\/(bin|obj)\/)/.test(p) || /^runtimes\/kotlin\/(src\/test\/|.*\/(build|\.gradle)\/)/.test(p),
+              (p) =>
+                /^runtimes\/csharp\/.*(\.csproj$|\/(bin|obj)\/)/.test(p) ||
+                /^runtimes\/kotlin\/(src\/test\/|.*\/(build|\.gradle)\/)/.test(p) ||
+                /^runtimes\/swift\/.*(Package\.swift$|\/\.build\/)/.test(p),
             );
             if (leaked.length > 0) missing.push(`no build files (${leaked.join(", ")})`);
             console.log(paths.join("\n"));
@@ -178,10 +185,60 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - run: pnpm test:e2e:kotlin
 
+  # ---- Swift SDK ----
+
+  # The runtime's swift-testing suite, on Linux (FoundationNetworking) and macOS (Darwin Foundation).
+  runtime-swift-linux:
+    runs-on: ubuntu-latest
+    container: swift:6.2
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - run: swift --version && swift test --package-path runtimes/swift
+
+  runtime-swift-macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - run: swift --version && swift test --package-path runtimes/swift
+
+  # Generates the edge-cases SDK and runs the swift-testing suite in e2e/swift against the shared mock server.
+  e2e-swift-linux:
+    runs-on: ubuntu-latest
+    container: swift:6.2
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-workspace
+      - run: pnpm test:e2e:swift
+
+  e2e-swift-macos:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-workspace
+      - run: pnpm test:e2e:swift
+
   # Single required check for branch protection; add new jobs to `needs`.
   ci-ok:
     if: always()
-    needs: [typecheck, test, build, e2e-typescript, runtime-typescript-node, runtime-typescript-smoke, runtime-csharp, e2e-csharp, runtime-kotlin, e2e-kotlin]
+    needs:
+      - typecheck
+      - test
+      - build
+      - e2e-typescript
+      - runtime-typescript-node
+      - runtime-typescript-smoke
+      - runtime-csharp
+      - e2e-csharp
+      - runtime-kotlin
+      - e2e-kotlin
+      - runtime-swift-linux
+      - runtime-swift-macos
+      - e2e-swift-linux
+      - e2e-swift-macos
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
