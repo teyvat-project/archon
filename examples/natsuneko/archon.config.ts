@@ -9,6 +9,6 @@ export default defineConfig({
     csharp({ output: 'csharp', namespace: 'Natsuneko.Api' }),
     kotlin({ output: 'kotlin', packageName: 'com.natsuneko.api' }),
     swift({ output: 'swift', moduleName: 'NatsunekoApi' }),
-    go({ output: 'go', module: 'github.com/natsuneko/api-go', packageName: 'natsuneko' }),
+    go({ output: 'go', module: 'github.com/mika-f/api-go', packageName: 'natsuneko' }),
   ],
 });

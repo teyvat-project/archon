@@ -418,8 +418,8 @@ go/
 
 ```go
 import (
-	"github.com/natsuneko/api-go"
-	"github.com/natsuneko/api-go/core"
+	"github.com/mika-f/api-go"
+	"github.com/mika-f/api-go/core"
 )
 
 client := natsuneko.NewClient(natsuneko.ClientOptions{
