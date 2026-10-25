@@ -1,5 +1,5 @@
 // build 前に ../../runtimes/<lang>/src を ./runtimes/<lang>/src にコピーする（配布物にランタイムを同梱するため）。
-// テスト（*.test.ts、kotlin の src/test、go の *_test.go と testdata/）、.csproj、bin/、obj/、build/、.gradle/ は除く。
+// テスト（*.test.ts、kotlin の src/test、go の *_test.go と testdata/）、.csproj、bin/、obj/、build/、.gradle/ は除く（rust のテストと Cargo.toml は src の外にある）。
 // 生成時は src/plugins/<lang>/runtime.ts の resolveRuntimeDir がこのコピーを先に探す。
 import { cpSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';

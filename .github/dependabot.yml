@@ -34,6 +34,16 @@ updates:
       gradle:
         patterns: ['*']
 
+  - package-ecosystem: cargo
+    # The generated SDK's versions live in packages/archon/src/plugins/rust/project.ts; the plugin's versions test
+    # fails until that file is bumped to match these manifests.
+    directories: ['/runtimes/rust', '/e2e/rust']
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ['*']
+
   - package-ecosystem: gomod
     # Both modules use the standard library only; this keeps their `go` directive in view. The generated SDK's
     # version lives in packages/archon/src/plugins/go/project.ts (the plugin's client test checks they match).

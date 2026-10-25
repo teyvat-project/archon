@@ -8,3 +8,5 @@ export { swift } from './plugins/swift/index.js';
 export type { SwiftPluginAPI, SwiftPluginOptions } from './plugins/swift/index.js';
 export { typescript } from './plugins/typescript/index.js';
 export type { NamingRule, TypeScriptPluginAPI, TypeScriptPluginOptions } from './plugins/typescript/index.js';
+export { rust } from './plugins/rust/index.js';
+export type { RustPluginAPI, RustPluginOptions } from './plugins/rust/index.js';

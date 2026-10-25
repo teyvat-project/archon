@@ -63,6 +63,18 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  e2e/rust:
+    devDependencies:
+      '@natsuneko-laboratory/archon':
+        specifier: workspace:*
+        version: link:../../packages/archon
+      '@natsuneko-laboratory/archon-e2e-mock-server':
+        specifier: workspace:*
+        version: link:../mock-server
+      jiti:
+        specifier: ^2.7.0
+        version: 2.7.0
+
   e2e/swift:
     devDependencies:
       '@natsuneko-laboratory/archon':
