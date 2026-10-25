@@ -6,5 +6,5 @@
       "@natsuneko-laboratory/archon/plugins": ["../../packages/archon/src/plugins.ts"]
     }
   },
-  "include": ["global-setup.ts", "vitest.config.ts", "test", "generated"]
+  "include": ["global-setup.ts", "vitest.config.ts", "test", "smoke", "generated"]
 }
