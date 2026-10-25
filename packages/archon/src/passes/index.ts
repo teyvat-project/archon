@@ -43,13 +43,14 @@ export function runCommonPasses(
 /** プラグインの要求に応じた hoist を `structuredClone(ir)` に適用して返す（元の IR は変更しない）。 */
 export function runPluginPasses(
   ir: IRDocument,
-  req: { hoistInlineObjects?: boolean; hoistInlineEnums?: boolean },
+  req: { hoistInlineObjects?: boolean; hoistInlineEnums?: boolean; hoistInlineUnions?: boolean },
   nameHook?: HoistOptions['nameHook'],
 ): IRDocument {
   const out = structuredClone(ir);
   const hoist: HoistOptions = {
     objects: req.hoistInlineObjects === true,
     enums: req.hoistInlineEnums === true,
+    unions: req.hoistInlineUnions === true,
   };
   if (nameHook) hoist.nameHook = nameHook;
   hoistInlineSchemas(out, hoist);

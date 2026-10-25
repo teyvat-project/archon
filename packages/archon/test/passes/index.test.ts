@@ -179,6 +179,12 @@ describe('runPluginPasses', () => {
     expect(out).not.toBe(ir);
   });
 
+  it('passes hoistInlineUnions through', () => {
+    const ir = doc({ Pet: obj({ either: { kind: 'union', nullable: false, variants: [str, obj({ a: str })] } as IRSchema }) });
+    const out = runPluginPasses(ir, { hoistInlineUnions: true });
+    expect([...out.schemas.keys()]).toEqual(['Pet', 'PetEither']);
+  });
+
   it('passes the name hook through', () => {
     const ir = doc({ Pet: obj({ owner: obj({ name: str }) }) });
     const out = runPluginPasses(ir, { hoistInlineObjects: true }, (_path, { suggested }) => `Custom${suggested}`);

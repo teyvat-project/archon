@@ -6,6 +6,8 @@ import { tagValue } from './discriminator.js';
 export type HoistOptions = {
   objects: boolean;
   enums: boolean;
+  /** トップレベルでない union も巻き上げる（union に名前が要る言語向け）。 */
+  unions?: boolean;
   nameHook?: (path: SchemaPath, ctx: { suggested: string }) => string | undefined;
 };
 
@@ -41,18 +43,20 @@ function tagOf(object: ObjectSchema, property: string): string | undefined {
 }
 
 /**
- * inline の object（プロパティを 1 つ以上持つもの）/ enum を named schema に移し、`ref` に置き換える。
+ * inline の object（プロパティを 1 つ以上持つもの）/ enum /（`unions` のとき）union を named schema に移し、`ref` に置き換える。
  * union のバリアント object も対象で、判別あり union の `mapping` の `''` は巻き上げ後の名前で埋める。
  *
  * named schemas（宣言順）→ operations（順）を処理し、巻き上げた schema は `ir.schemas` の末尾に
  * 親 → 子の順で追加する。トップレベルの named schema 自体は巻き上げない。
  */
 export function hoistInlineSchemas(ir: IRDocument, opts: HoistOptions): void {
-  if (!opts.objects && !opts.enums) return;
+  if (!opts.objects && !opts.enums && !opts.unions) return;
   const namer = new UniqueNamer(ir.schemas.keys());
 
   const shouldHoist = (s: IRSchema): boolean =>
-    (opts.objects && s.kind === 'object' && s.properties.length > 0) || (opts.enums && s.kind === 'enum');
+    (opts.objects && s.kind === 'object' && s.properties.length > 0) ||
+    (opts.enums && s.kind === 'enum') ||
+    (opts.unions === true && s.kind === 'union');
 
   /** `name` はこの位置の提案名（hoist されなければ子の命名の親名としてそのまま使う）。 */
   function walk(schema: IRSchema, path: SchemaPath, name: string, inlineProps?: ReadonlySet<string>): IRSchema {
