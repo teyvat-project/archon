@@ -6,7 +6,7 @@ plugins {
 dependencies {
     testImplementation("archon.e2e:edge-cases")
     testImplementation("io.ktor:ktor-client-cio:3.6.0")
-    testImplementation(platform("org.junit:junit-bom:5.14.4"))
+    testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation(kotlin("test-junit5"))
     testImplementation("org.junit.jupiter:junit-jupiter-params")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
