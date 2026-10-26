@@ -1,7 +1,7 @@
 {
   "name": "@natsuneko-laboratory/archon",
   "version": "0.1.1",
-  "description": "Generate SDKs with minimal dependencies for TypeScript, C#, Kotlin, Swift, Rust and Go from OpenAPI 3.0 / 3.1 specs",
+  "description": "Generate SDKs with minimal dependencies for TypeScript, C#, Kotlin, Swift, Rust, Go and Ruby from OpenAPI 3.0 / 3.1 specs",
   "keywords": [
     "openapi",
     "swagger",
@@ -13,7 +13,8 @@
     "kotlin",
     "swift",
     "rust",
-    "go"
+    "go",
+    "ruby"
   ],
   "license": "MIT",
   "homepage": "https://github.com/teyvat-project/archon#readme",

@@ -40,6 +40,7 @@ pnpm test:e2e:kotlin   # same scenarios with the generated Kotlin SDK (e2e/kotli
 pnpm test:e2e:swift    # same scenarios with the generated Swift SDK (e2e/swift; needs Swift 6.1+)
 pnpm test:e2e:rust     # same scenarios with the generated Rust SDK (e2e/rust; needs cargo)
 pnpm test:e2e:go       # same scenarios with the generated Go SDK (e2e/go; needs Go 1.22+)
+pnpm test:e2e:ruby     # same scenarios with the generated Ruby SDK (e2e/ruby; needs Ruby 3.2+)
 pnpm -F @natsuneko-laboratory/archon-e2e-typescript smoke bun   # run the generated SDK on Bun (or `smoke deno`)
 
 # Runtime unit tests
@@ -48,6 +49,7 @@ runtimes/kotlin/gradlew -p runtimes/kotlin test       # the Gradle wrapper is in
 swift test --package-path runtimes/swift              # swift-testing
 cargo test --manifest-path runtimes/rust/Cargo.toml
 (cd runtimes/go && go test -race ./...)
+ruby -w -Iruntimes/ruby/test runtimes/ruby/test/all.rb   # minitest
 ```
 
 The compile tests for generated code are skipped when the toolchain is missing:
@@ -56,15 +58,18 @@ The compile tests for generated code are skipped when the toolchain is missing:
 - Kotlin (`gradle build`, warnings as errors) needs JDK 17 or later.
 - Swift (`swift build -Xswiftc -warnings-as-errors`) needs Swift 6 or later.
 - Rust (`cargo clippy -- -D warnings`) needs `cargo`.
+- Ruby (`ruby -w`, loading the SDK, `rbs validate`) needs Ruby 3.2 or later; `rbs validate` is skipped without `rbs`
+  (`gem install rbs`).
 
 To try a generated Kotlin SDK locally, run `runtimes/kotlin/gradlew -p <output dir> build`.
 
 ## CI
 
 CI (`.github/workflows/ci.yml`) runs all of the above. It installs the toolchains with `actions/setup-dotnet`,
-`actions/setup-java` and `dtolnay/rust-toolchain`. It also runs the TypeScript runtime unit tests on Node.js 18, 20,
-22 and 24, smoke tests the generated TypeScript SDK on Bun and Deno, and runs the Swift runtime tests and E2E on both
-Linux (the `swift:6.2` container) and macOS.
+`actions/setup-java`, `dtolnay/rust-toolchain` and `ruby/setup-ruby`. It also runs the TypeScript runtime unit tests
+on Node.js 18, 20, 22 and 24, smoke tests the generated TypeScript SDK on Bun and Deno, runs the Ruby runtime tests on
+Ruby 3.2 and the latest release, and runs the Swift runtime tests and E2E on both Linux (the `swift:6.2` container)
+and macOS.
 
 ## Releasing
 

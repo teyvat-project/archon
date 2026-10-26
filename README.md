@@ -4,7 +4,7 @@
 [![CI](https://github.com/teyvat-project/Archon/actions/workflows/ci.yml/badge.svg)](https://github.com/teyvat-project/Archon/actions/workflows/ci.yml)
 
 **Archon** generates SDKs with minimal dependencies from OpenAPI 3.0 / 3.1 specs. You configure it once, and it
-generates idiomatic clients for **TypeScript, C#, Kotlin, Swift, Rust and Go**.
+generates idiomatic clients for **TypeScript, C#, Kotlin, Swift, Rust, Go and Ruby**.
 
 Each SDK includes a small handwritten runtime that is copied into the output. It handles authentication
 (including OAuth2), middleware, retries, safe redirects and typed errors, so the generated code adds as few
@@ -18,6 +18,7 @@ dependencies as possible to your project:
 | **Swift**      | Swift 6 on macOS 12+, iOS 15+, tvOS 15+, watchOS 8+, visionOS 1+, Linux | none (Foundation only)                                      |
 | **Rust**       | stable Rust 1.88+ (edition 2021), tokio                       | `reqwest`, `serde`, `serde_json`, `tokio`                             |
 | **Go**         | Go 1.22+                                                      | none (standard library only)                                          |
+| **Ruby**       | Ruby 3.2+ (CRuby), with RBS signatures                        | none (standard library only)                                          |
 
 ## Features
 
@@ -85,12 +86,12 @@ if (error) {
 To generate SDKs for more languages, add more plugins:
 
 ```ts
-import { csharp, go, kotlin, rust, swift, typescript } from '@natsuneko-laboratory/archon/plugins';
+import { csharp, go, kotlin, ruby, rust, swift, typescript } from '@natsuneko-laboratory/archon/plugins';
 
 export default defineConfig({
   input: './openapi.yaml',
   output: './sdk',
-  plugins: [typescript(), csharp(), kotlin(), swift(), rust(), go()],
+  plugins: [typescript(), csharp(), kotlin(), swift(), rust(), go(), ruby()],
 });
 ```
 
@@ -156,7 +157,7 @@ All plugin options are optional. All plugins accept the following common options
 
 | Option                | Description                                                                                              |
 | --------------------- | -------------------------------------------------------------------------------------------------------- |
-| `output`              | Subdirectory of `output.path`. Defaults to the language name (`'typescript'`, `'csharp'`, `'kotlin'`, `'swift'`, `'rust'`, `'go'`). |
+| `output`              | Subdirectory of `output.path`. Defaults to the language name (`'typescript'`, `'csharp'`, `'kotlin'`, `'swift'`, `'rust'`, `'go'`, `'ruby'`). |
 | `naming`              | `{ case, name }` rules per kind of name (see each language below).                                       |
 | `typeMappings`        | Overrides keyed by `'kind:format'` (e.g. `'string:uuid'`) or `'kind'` (e.g. `'integer'`).                 |
 | `hooks`               | Callbacks for `typeName`, `methodName`, `typeOverride` and, except in TypeScript, `propertyName` and `fileName`. |
@@ -244,6 +245,20 @@ All plugin options are optional. All plugins accept the following common options
 | `naming`       | types / methods / fields PascalCase, files `<snake_case>_model` | `{ type, method, property, file }`.                                                                                                                                                                                  |
 | `typeMappings` | `{}`                                                     | e.g. `{ 'string:date-time': 'string', 'string:uuid': { type: 'uuid.UUID', import: 'github.com/google/uuid' } }`.                                                                                                             |
 | `hooks`        | `{}`                                                     | `typeName`, `methodName`, `propertyName`, `fileName`, `typeOverride` (a Go type or `{ type, import }`).                                                                                                                      |
+
+</details>
+
+<details>
+<summary><strong>Ruby</strong> — <code>ruby()</code></summary>
+
+| Option         | Default                                             | Description                                                                                                                                                                                       |
+| -------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gemName`      | title in snake_case                                 | Gem name: `lib/<gemName>.rb`, `<gemName>.gemspec` and `sig/<gemName>.rbs`.                                                                                                                         |
+| `moduleName`   | `gemName` in PascalCase                             | SDK module. It can be nested (`'Acme::Api'`). The runtime is `<moduleName>::Core`.                                                                                                                 |
+| `package`      | derived from `info`                                 | `.gemspec` `version` (default: `info.version`, or `0.1.0` if RubyGems rejects it), `summary`, `description`, `authors`, `license`, `homepage`, `requiredRubyVersion` (default `3.2`). `false` skips the gemspec. |
+| `naming`       | types PascalCase, methods / members / files snake_case | `{ type, method, property, file }`.                                                                                                                                                             |
+| `typeMappings` | `{}`                                                | A built-in type (`'string'`, `'integer'`, `'number'`, `'boolean'`, `'time'`, `'date'`, `'bytes'`, `'upload'`, `'any'`), e.g. `{ 'string:date-time': 'string' }`, or `{ type, rbs }` with a `Core::Types` expression and its RBS type. |
+| `hooks`        | `{}`                                                | `typeName`, `methodName`, `propertyName`, `fileName`, `typeOverride` (the same values as `typeMappings`).                                                                                         |
 
 </details>
 
@@ -782,6 +797,86 @@ It is kept in memory so it can be resent), unknown schemas → `json.RawMessage`
 - Additional properties are not kept on objects that also declare properties. Objects with no declared properties
   become `map[string]T`.
 
+### Ruby
+
+Targets Ruby 3.2+ (CRuby) and depends only on the standard library (`net/http`, `json`, `time`, `date`, `uri`,
+`securerandom`). Every file passes `ruby -w` without warnings, and the RBS signatures pass `rbs validate`.
+
+```text
+ruby/
+  <gem>.gemspec           # skipped with package: false
+  lib/<gem>.rb            # require this: loads everything below
+  lib/<gem>/client.rb     # Client / DEFAULT_BASE_URL / SECURITY_SCHEMES
+  lib/<gem>/auth.rb       # credentials per security scheme (Auth)
+  lib/<gem>/models/*.rb   # one file per schema (Data classes, enum modules, union modules)
+  lib/<gem>/services/*.rb # one service per tag
+  lib/<gem>/core.rb, core/*.rb   # the runtime (<Module>::Core)
+  sig/<gem>.rbs, sig/<gem>/core.rbs
+```
+
+```ruby
+require 'petstore'
+
+client = Petstore::Client.new(
+  base_url: 'https://petstore.example.com/v1',   # defaults to servers[0] (Petstore::Client::DEFAULT_BASE_URL)
+  auth: Petstore::Auth.new(bearer_auth: 'token'),
+  timeout: 30,
+  middleware: [Petstore::Core::Middleware::Retry.new],
+)
+
+pet = client.pets.show_pet_by_id(pet_id: '1')
+pet = client.pets.show_pet_by_id(pet_id: '1') { |response| puts response.status }
+```
+
+(Here the plugin is configured with `ruby({ gemName: 'petstore', moduleName: 'Petstore' })`.)
+
+- Parameters are keyword arguments in snake_case (required ones are required keywords, optional ones default to
+  `nil`). A request body is the first positional argument (`body = nil` when optional). The last keyword is
+  `request_options:` (`{ headers:, base_url:, extensions: }`). Object arguments accept the model or a Hash of its
+  keyword arguments (`client.pets.create_pet({ name: 'Tama' })`). Names that clash with Ruby keywords or `Object`
+  methods get a trailing `_` (`class_`, `method_`).
+- Operations return the decoded body, or `nil` for no content (204, or an empty body). Text responses are `String`s,
+  and binary ones are binary `String`s. Pass a block to receive the `Core::Response` (`status`, `headers`, `body`,
+  `url`, which is the final URL after redirects).
+- Errors are exceptions under `Core::Error`, also aliased in the SDK module. Non-2xx responses raise
+  `Petstore::ApiError` (`status`, `headers`, `raw_body`, `url`, `response`, and `body`, the declared error model or
+  `nil`). Network failures raise `TransportError`, and timeouts `TimeoutError` (a `TransportError`). 2xx decode
+  failures raise `DecodeError` (`status`, `raw_body`). A missing required scheme raises `AuthError` (`schemes`) before
+  sending.
+- Auth: set the `Auth` attributes (the scheme names in snake_case). They are read on every request, so you can
+  replace them at any time. Bearer / API keys take a `String` or a callable returning one. Basic takes
+  `Core::Basic.new(username:, password:)`, `{ username:, password: }` or a callable. OAuth2 / OpenID Connect take
+  `Core::OAuth2.new(access_token: | client_credentials: | refresh_token:)` or the same keys as a Hash (e.g.
+  `{ client_credentials: { client_id:, client_secret: } }`). Concurrent token fetches from several threads share one
+  request. Use `custom_auth:` (`->(request, context) { ... }`) for unsupported schemes.
+- Middleware: any object responding to `call(request, context, next_)` (a lambda works) that returns
+  `next_.call(request)`. Pass it as `middleware:` or call `client.use(...)` (a block works too). Built-in:
+  `Core::Middleware::Logging` (`logger:` takes a `Logger` or a callable), `UserAgent`, `Retry`, `Retry401`.
+- Transport: `transport:` takes anything responding to `call(request, timeout:)` that sends one request and returns a
+  `Core::Response`. The default is `Core::NetHttpTransport`, which opens a connection per request (so a client can be
+  shared between threads). Use `Core::NetHttpTransport.new(configure: ->(http) { http.cert = ... })` for client
+  certificates, CA files and other `Net::HTTP` settings. Redirects are followed by the runtime, not the transport.
+- `timeout:` (seconds) limits connecting and each socket read and write, and the request fails with `TimeoutError` if
+  the final response has not arrived in time. Ruby has no cancellation token, so there is no per-call cancellation.
+
+**Type mapping:** `date-time` → `Time` (the offset is kept), `date` → `Date`, `uuid` / `uri` → `String`, integers →
+`Integer`, numbers → `Float`, `byte` → a binary `String`, `binary` → `Core::Upload` (`content`, `filename`,
+`content_type`; `Core::Upload.from_path(path)` reads a file. It is kept in memory so it can be resent), unknown schemas →
+the parsed JSON.
+
+- **Models** are immutable `Data` classes (`Petstore::Pet.new(id: 1, name: 'Tama')`). `Pet.from_json(JSON.parse(text))`
+  reads the wire names, ignores unknown properties, and raises `DecodeError` for missing required properties, `null`
+  in non-nullable required properties and values of the wrong type. `to_h` / `as_json` return the JSON object keyed by
+  wire names (optional `nil`s are left out), and `to_json` writes it.
+- **Enums** are modules of constants (`Petstore::Status::ACTIVE`, `Status::VALUES`, `Status.known?(value)`). Values are
+  plain `String`s / `Integer`s, so unknown values are kept and sent back unchanged.
+- **Unions** are modules whose `from_json` returns the variant itself (`Circle` or `Square`), or `Core::Unknown` (with
+  the JSON in `raw`, written back unchanged). Discriminated unions pick the variant from the discriminator, and a
+  variant's discriminator defaults to its tag (`Circle.new(radius: 1)` has `kind: 'circle'`). Non-discriminated
+  unions try the variants in declaration order and use the first one that parses.
+- Schemas named like Ruby classes (`String`, `Data`, `Time`, ...) keep their names inside the SDK module; the generated
+  code refers to Ruby's own classes as `::String` and so on.
+
 ## Custom plugins
 
 Create plugins with `definePlugin`. A plugin can depend on other plugins and use their public API. For example, the
@@ -824,7 +919,7 @@ runs, and `irRequirements`, which controls hoisting of inline objects and enums.
 - [x] Swift 6
 - [x] Rust
 - [x] Go 1.22+
-- [ ] Ruby 3.2+
+- [x] Ruby 3.2+
 
 ## Contributing
 
