@@ -1,0 +1,488 @@
+# Types of the runtime of an Archon-generated Ruby SDK.
+module Archon::Core
+  # A JSON value as `JSON.parse` returns it.
+  type json = nil | bool | Integer | Float | String | Array[json] | Hash[String, json]
+
+  # Something responding to `call` that returns a value of T (credentials read on every send).
+  interface _Provider[T]
+    def call: () -> T
+  end
+
+  interface _Middleware
+    def call: (Request request, CallContext context, ^(Request) -> Response next_) -> Response
+  end
+
+  interface _Transport
+    def call: (Request request, timeout: Numeric?) -> Response
+  end
+
+  interface _Logger
+    def info: (String line) -> untyped
+  end
+
+  interface _Auth
+    def []: (String scheme) -> untyped
+  end
+
+  class Error < StandardError
+  end
+
+  class ApiError < Error
+    attr_reader response: Response
+    attr_reader body: untyped
+    attr_reader decode_error: DecodeError?
+    def initialize: (Response response, ?body: untyped, ?decode_error: DecodeError?) -> void
+    def status: () -> Integer
+    def headers: () -> Headers
+    def raw_body: () -> String
+    def url: () -> String?
+  end
+
+  class TransportError < Error
+    def timeout?: () -> bool
+  end
+
+  class TimeoutError < TransportError
+  end
+
+  class DecodeError < Error
+    attr_reader status: Integer?
+    attr_reader raw_body: String?
+    def initialize: (String message, ?status: Integer?, ?raw_body: String?) -> void
+  end
+
+  class AuthError < Error
+    attr_reader schemes: Array[String]
+    def initialize: (String message, ?schemes: Array[String]) -> void
+    def self.missing: (Array[String] schemes) -> AuthError
+  end
+
+  type param_location = :path | :query | :header | :cookie
+  type param_style = :simple | :label | :matrix | :form | :space_delimited | :pipe_delimited | :deep_object
+
+  class ParamSpec < ::Data
+    attr_reader name: String
+    attr_reader location: param_location
+    attr_reader style: param_style
+    attr_reader explode: bool
+    attr_reader allow_reserved: bool
+    def initialize: (name: String, location: param_location, style: param_style, ?explode: bool, ?allow_reserved: bool) -> void
+  end
+
+  type scheme_kind = :http_bearer | :http_basic | :api_key | :oauth2 | :open_id_connect
+
+  class SecuritySchemeSpec < ::Data
+    attr_reader kind: scheme_kind
+    attr_reader location: (:header | :query | :cookie)?
+    attr_reader name: String?
+    attr_reader token_url: String?
+    attr_reader refresh_url: String?
+    def initialize: (kind: scheme_kind, ?location: (:header | :query | :cookie)?, ?name: String?, ?token_url: String?, ?refresh_url: String?) -> void
+  end
+
+  type body_kind = :json | :form | :multipart | :text | :binary
+  type content_kind = :json | :text | :binary
+
+  class Operation < ::Data
+    attr_reader name: String
+    attr_reader http_method: String
+    attr_reader path: String
+    attr_reader tags: Array[String]
+    attr_reader security: Array[Hash[String, Array[String]]]
+    attr_reader params: Array[ParamSpec]
+    attr_reader body: body_kind?
+    attr_reader media_type: String?
+    attr_reader success: content_kind?
+    attr_reader result: Types::Type?
+    attr_reader errors: Hash[String, Types::Type | :text]
+    def initialize: (name: String, http_method: String, path: String, ?tags: Array[String], ?security: Array[Hash[String, Array[String]]],
+                     ?params: Array[ParamSpec], ?body: body_kind?, ?media_type: String?, ?success: content_kind?, ?result: Types::Type?,
+                     ?errors: Hash[String, Types::Type | :text]) -> void
+  end
+
+  class Headers
+    include Enumerable[[String, String]]
+    def initialize: (?(Headers | Hash[String | Symbol, untyped])? headers) -> void
+    def []: (String | Symbol name) -> String?
+    def []=: (String | Symbol name, untyped value) -> untyped
+    def add: (String | Symbol name, untyped value) -> self
+    def delete: (String | Symbol name) -> nil
+    def values: (String | Symbol name) -> Array[String]
+    def key?: (String | Symbol name) -> bool
+    def empty?: () -> bool
+    def names: () -> Array[String]
+    def each: () { ([String, String]) -> void } -> void
+            | () -> Enumerator[[String, String], void]
+    def to_h: () -> Hash[String, String]
+  end
+
+  module Json
+    def self.encode: (untyped value) -> json
+    def self.generate: (untyped value) -> String
+    def self.parse: (String text) -> json
+    def self.scalar_text: (json value) -> String
+    def self.number_text: (Integer | Float number) -> String
+    def self.time: (Time value) -> String
+    def self.utf8: (String value) -> String
+  end
+
+  module Percent
+    def self.component: (untyped value) -> String
+    def self.reserved: (untyped value) -> String
+    def self.form: (untyped value) -> String
+  end
+
+  module Url
+    class Parts < ::Struct[String?]
+      attr_accessor scheme: String?
+      attr_accessor authority: String?
+      attr_accessor path: String
+      attr_accessor query: String?
+      attr_accessor fragment: String?
+    end
+
+    def self.split: (String raw) -> Parts
+    def self.absolute?: (String? raw) -> bool
+    def self.require_absolute!: (String raw) -> void
+    def self.resolve: (String base, String location) -> String
+    def self.origin: (String raw) -> String
+    def self.without_query: (String raw, Array[String] names) -> String
+    def self.query_pairs: (String? query) -> Array[String]
+    def self.decode_name: (String pair) -> String
+    def self.remove_dot_segments: (String path) -> String
+  end
+
+  module Params
+    def self.path: (String template, Array[ParamSpec] specs, Values values) -> String
+    def self.query: (Array[ParamSpec] specs, Values values) -> String
+    def self.cookie: (Array[ParamSpec] specs, Values values) -> String
+    def self.header: (ParamSpec spec, json value) -> String?
+  end
+
+  class Upload
+    attr_reader content: String
+    attr_reader filename: String?
+    attr_reader content_type: String?
+    def initialize: (String content, ?filename: String?, ?content_type: String?) -> void
+    def self.from_path: (String path, ?filename: String?, ?content_type: String?) -> Upload
+    def self.from_io: (IO | StringIO io, ?filename: String?, ?content_type: String?) -> Upload
+    def self.from_base64: (String text) -> Upload
+    def size: () -> Integer
+  end
+
+  class Body
+    def replayable?: () -> bool
+    def content_type: () -> String?
+    def open: () -> [String | IO | StringIO, Integer?]
+  end
+
+  class BytesBody < Body
+    attr_reader content: String
+    def initialize: (String content, ?String? content_type) -> void
+  end
+
+  class IOBody < Body
+    def initialize: (IO | StringIO io, ?String? content_type, ?length: Integer?) -> void
+  end
+
+  class FormBody < Body
+    attr_reader fields: Array[[String, String]]
+    def initialize: () -> void
+    def self.from_json: (Hash[String, json] object) -> FormBody
+    def self.field_values: (json value) -> Array[String]
+    def add: (String | Symbol name, untyped value) -> self
+    def encode: () -> String
+  end
+
+  class MultipartBody < Body
+    attr_reader boundary: String
+    def initialize: () -> void
+    def text: (String | Symbol name, untyped value) -> self
+    def field: (String | Symbol name, untyped value) -> self
+    def file: (String | Symbol name, (Upload | String)? upload) -> self
+    def files: (String | Symbol name, Array[Upload | String]? uploads) -> self
+  end
+
+  class Values
+    def initialize: () -> void
+    def path: (String name, untyped value) -> self
+    def query: (String name, untyped value) -> self
+    def header: (String name, untyped value) -> self
+    def cookie: (String name, untyped value) -> self
+    def key?: (param_location location, String name) -> bool
+    def get: (param_location location, String name) -> json
+    def json_body: (untyped value) -> self
+    def form_body: (untyped value) -> self
+    def multipart_body: (untyped value) -> self
+    def text_body: (untyped value) -> self
+    def binary_body: (Upload | String value) -> self
+    def body: (Body value) -> self
+    def body_for: (String? media_type) -> Body?
+  end
+
+  module Types
+    class Type
+      def decode: (json json, String path) -> untyped
+      def encode: (untyped value) -> json
+    end
+
+    class Scalar < Type
+      def initialize: (String description, ^(json) -> boolish accept, ?(^(untyped, String) -> untyped)? convert) -> void
+    end
+
+    class Bytes < Scalar
+    end
+
+    class ArrayOf < Type
+      attr_reader item: Type
+      def initialize: (Type item) -> void
+    end
+
+    class MapOf < Type
+      attr_reader value: Type
+      def initialize: (Type value) -> void
+    end
+
+    class Nullable < Type
+      def initialize: (Type type) -> void
+    end
+
+    interface _Decoder
+      def decode_json: (json json, String path) -> untyped
+    end
+
+    class Ref < Type
+      def initialize: (_Decoder | ^() -> _Decoder target) -> void
+      def target: () -> _Decoder
+    end
+
+    STRING: Scalar
+    INTEGER: Scalar
+    NUMBER: Scalar
+    BOOLEAN: Scalar
+    TIME: Scalar
+    DATE: Scalar
+    BYTES: Bytes
+    UPLOAD: Scalar
+    ANY: Type
+
+    def self.array: (Type item) -> ArrayOf
+    def self.map: (Type value) -> MapOf
+    def self.nullable: (Type type) -> Nullable
+    def self.ref: (_Decoder | ^() -> _Decoder target) -> Ref
+    def self.parse_time: (String text, String path) -> Time
+    def self.parse_date: (String text, String path) -> Date
+    def self.describe: (json json) -> String
+  end
+
+  class Field < ::Data
+    attr_reader name: Symbol
+    attr_reader wire: String
+    attr_reader type: Types::Type
+    attr_reader required: bool
+    attr_reader nullable: bool
+    def initialize: (name: Symbol, wire: String, type: Types::Type, ?required: bool, ?nullable: bool) -> void
+  end
+
+  module Model
+    module ClassMethods
+      def json_fields: (*Field fields) -> Array[Field]
+      def from_json: (json json) -> untyped
+      def decode_json: (json json, String path) -> untyped
+      def coerce: (untyped value) -> untyped
+    end
+
+    def as_json: () -> Hash[String, json]
+    def to_h: () -> Hash[String, json]
+    def to_json: (*untyped) -> String
+  end
+
+  class Unknown < ::Data
+    attr_reader raw: json
+    def initialize: (raw: json) -> void
+    def as_json: () -> json
+    def to_json: (*untyped) -> String
+  end
+
+  module Union
+    def discriminator: (String property, Hash[String, Types::Type] mapping) -> void
+    def variants: (*Types::Type types) -> void
+    def from_json: (json json) -> untyped
+    def decode_json: (json json, String path) -> untyped
+  end
+
+  class Request
+    attr_accessor http_method: String
+    attr_accessor url: String
+    attr_accessor body: Body?
+    attr_reader headers: Headers
+    def initialize: (http_method: String, url: String, ?headers: Headers | Hash[String, untyped], ?body: Body?) -> void
+    def replayable?: () -> bool
+    def set_query_parameter: (String name, String value) -> void
+  end
+
+  class Response
+    attr_reader status: Integer
+    attr_reader headers: Headers
+    attr_reader body: String
+    attr_reader url: String?
+    def initialize: (status: Integer, ?headers: Headers | Hash[String, untyped], ?body: String, ?url: String?) -> void
+    def success?: () -> bool
+    def text: () -> String
+  end
+
+  class CallContext
+    attr_reader operation_name: String
+    attr_reader http_method: String
+    attr_reader path_template: String
+    attr_reader tags: Array[String]
+    attr_reader security: Array[Hash[String, Array[String]]]
+    attr_reader redact_headers: Array[String]
+    attr_reader redact_query: Array[String]
+    attr_reader extensions: Hash[untyped, untyped]
+    attr_accessor attempt: Integer
+    def initialize: (operation_name: String, http_method: String, path_template: String, ?tags: Array[String],
+                     ?security: Array[Hash[String, Array[String]]], ?redact_headers: Array[String], ?redact_query: Array[String],
+                     ?extensions: Hash[untyped, untyped], ?attempt: Integer) -> void
+  end
+
+  class RequestOptions < ::Data
+    attr_reader headers: Hash[String | Symbol, untyped]
+    attr_reader base_url: String?
+    attr_reader extensions: Hash[untyped, untyped]
+    def initialize: (?headers: Hash[String | Symbol, untyped], ?base_url: String?, ?extensions: Hash[untyped, untyped]) -> void
+    def self.coerce: (request_options value) -> RequestOptions
+  end
+
+  type request_options = RequestOptions | Hash[Symbol, untyped] | nil
+
+  class NetHttpTransport
+    def initialize: (?configure: (^(Net::HTTP) -> void)?) -> void
+    def call: (Request request, ?timeout: Numeric?) -> Response
+  end
+
+  module Redirects
+    MAX: Integer
+    BODY_HEADERS: Array[String]
+    def self.follow: (_Transport transport, Request request, timeout: Numeric?, ?credential_headers: Array[String],
+                      ?credential_query: Array[String]) -> Response
+    def self.now: () -> Float
+  end
+
+  class Basic < ::Data
+    attr_reader username: String
+    attr_reader password: String
+    def initialize: (username: String, password: String) -> void
+    def self.coerce: (Basic | Hash[Symbol | String, String] | [String, String] value) -> Basic
+  end
+
+  type basic_credentials = Basic | Hash[Symbol | String, String] | [String, String] | _Provider[Basic | Hash[Symbol | String, String] | [String, String]]
+  type token_credentials = String | _Provider[String]
+
+  class OAuth2
+    class ClientCredentials < ::Data
+      attr_reader client_id: String
+      attr_reader client_secret: String?
+      attr_reader scopes: Array[String]
+      attr_reader token_url: String?
+      attr_reader client_auth: :basic | :post
+      def initialize: (client_id: String, client_secret: String?, ?scopes: Array[String], ?token_url: String?, ?client_auth: :basic | :post) -> void
+    end
+
+    class RefreshToken < ::Data
+      attr_reader refresh_token: String
+      attr_reader client_id: String
+      attr_reader client_secret: String?
+      attr_reader token_url: String?
+      attr_reader client_auth: :basic | :post
+      attr_reader on_refreshed: (^(TokenSet) -> void)?
+      def initialize: (refresh_token: String, client_id: String, ?client_secret: String?, ?token_url: String?, ?client_auth: :basic | :post,
+                       ?on_refreshed: (^(TokenSet) -> void)?) -> void
+    end
+
+    attr_reader access_token: token_credentials?
+    attr_reader client_credentials: ClientCredentials?
+    attr_reader refresh_token: RefreshToken?
+    def initialize: (?access_token: token_credentials?, ?client_credentials: (ClientCredentials | Hash[Symbol, untyped])?,
+                     ?refresh_token: (RefreshToken | Hash[Symbol, untyped])?) -> void
+    def configured?: () -> bool
+    def self.coerce: (oauth2_credentials value) -> OAuth2
+  end
+
+  type oauth2_credentials = OAuth2 | Hash[Symbol, untyped] | token_credentials
+
+  class AuthLayer
+    class Snapshot
+      def initialize: (untyped auth) -> void
+      def value: (String scheme) -> untyped
+    end
+
+    def initialize: (Client client) -> void
+    def call: (Request request, CallContext context, ^(Request) -> Response next_) -> Response
+    def self.select: (Array[Hash[String, Array[String]]] requirements) { (String) -> bool } -> [Hash[String, Array[String]]?, Array[String]?]
+    def self.token: (token_credentials value) -> String
+    def self.set_cookie: (Headers headers, String name, String value) -> void
+  end
+
+  class TokenSet < ::Data
+    attr_reader access_token: String
+    attr_reader refresh_token: String?
+    attr_reader expires_at: Time?
+    attr_reader scope: String?
+    def initialize: (access_token: String, refresh_token: String?, expires_at: Time?, scope: String?) -> void
+  end
+
+  class TokenManager
+    def initialize: (config: OAuth2, token_url: String?, base_url: String, scheme: String, ?transport: _Transport, ?timeout: Numeric?,
+                     ?now: (^() -> Time)?, ?leeway: Numeric) -> void
+    def token: (?Array[String] scopes) -> String
+    def invalidate: (?String? rejected) -> void
+  end
+
+  type middleware = _Middleware | ^(Request, CallContext, ^(Request) -> Response) -> Response
+
+  class Client
+    attr_reader base_url: String
+    attr_reader security_schemes: Hash[String, SecuritySchemeSpec]
+    attr_reader auth: untyped
+    attr_reader headers: Hash[String | Symbol, untyped]
+    attr_reader timeout: Numeric?
+    attr_reader transport: _Transport
+    attr_reader custom_auth: (^(Request, CallContext) -> void)?
+    def initialize: (base_url: String, ?security_schemes: Hash[String, SecuritySchemeSpec], ?auth: untyped, ?headers: Hash[String | Symbol, untyped],
+                     ?timeout: Numeric?, ?middleware: Array[middleware], ?transport: _Transport?, ?custom_auth: (^(Request, CallContext) -> void)?) -> void
+    def use: (?middleware? middleware) ?{ (Request, CallContext, ^(Request) -> Response) -> Response } -> self
+    def call: (Operation operation, ?Values? values, ?request_options request_options) ?{ (Response) -> void } -> untyped
+  end
+
+  module Middleware
+    MASK: String
+    DEFAULT_REDACT_HEADERS: Array[String]
+
+    class Logging
+      def initialize: (?logger: (_Logger | ^(String) -> void)?, ?include_headers: bool, ?redact_headers: Array[String], ?redact_query: Array[String],
+                       ?clock: (^() -> Numeric)?) -> void
+      def call: (Request request, CallContext context, ^(Request) -> Response next_) -> Response
+      def self.masked_url: (String url, Array[String] redact_query) -> String
+    end
+
+    class UserAgent
+      def initialize: (String value) -> void
+      def call: (Request request, CallContext context, ^(Request) -> Response next_) -> Response
+    end
+
+    class Retry
+      DEFAULT_STATUSES: Array[Integer]
+      DEFAULT_METHODS: Array[String]
+      def initialize: (?max_attempts: Integer, ?base_delay: Numeric, ?max_delay: Numeric, ?max_retry_after: Numeric, ?statuses: Array[Integer],
+                       ?methods: Array[String], ?retry_network_errors: bool, ?sleep: (^(Numeric) -> void)?, ?random: (^() -> Float)?,
+                       ?now: (^() -> Time)?) -> void
+      def call: (Request request, CallContext context, ^(Request) -> Response next_) -> Response
+    end
+
+    class Retry401
+      def initialize: (?(^(CallContext, Response) -> boolish)? on_unauthorized) ?{ (CallContext, Response) -> boolish } -> void
+      def call: (Request request, CallContext context, ^(Request) -> Response next_) -> Response
+    end
+  end
+end

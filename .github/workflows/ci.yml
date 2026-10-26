@@ -28,7 +28,7 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # The C#, Kotlin and Swift compile tests build several generated SDKs.
+    # The C#, Kotlin, Swift, Rust, Go and Ruby compile tests build several generated SDKs.
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -60,6 +60,11 @@ jobs:
         with:
           go-version: stable
           cache: false
+      # For the `ruby -w` / `rbs validate` compile tests of the Ruby output (skipped without Ruby 3.2+ / rbs).
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ruby
+      - run: gem install rbs --no-document
       - run: pnpm test
 
   build:
@@ -78,7 +83,7 @@ jobs:
             const paths = files.map((f) => f.path);
             const required = ["dist/cli.js", "dist/index.js", "dist/index.d.ts", "dist/plugins.js", "dist/plugins.d.ts"];
             const missing = required.filter((p) => !paths.includes(p));
-            for (const lang of ["typescript", "csharp", "kotlin", "swift", "rust", "go"]) {
+            for (const lang of ["typescript", "csharp", "kotlin", "swift", "rust", "go", "ruby"]) {
               if (!paths.some((p) => p.startsWith(`runtimes/${lang}/`))) missing.push(`runtimes/${lang}/**`);
             }
             const leaked = paths.filter(
@@ -87,7 +92,8 @@ jobs:
                 /^runtimes\/kotlin\/(src\/test\/|.*\/(build|\.gradle)\/)/.test(p) ||
                 /^runtimes\/swift\/.*(Package\.swift$|\/\.build\/)/.test(p) ||
                 /^runtimes\/rust\/(tests\/|target\/|Cargo\.)/.test(p) ||
-                /^runtimes\/go\/.*(_test\.go$|\/testdata\/)/.test(p),
+                /^runtimes\/go\/.*(_test\.go$|\/testdata\/)/.test(p) ||
+                /^runtimes\/ruby\/(test|sig)\//.test(p),
             );
             if (leaked.length > 0) missing.push(`no build files (${leaked.join(", ")})`);
             console.log(paths.join("\n"));
@@ -305,6 +311,43 @@ jobs:
           workspaces: e2e/rust
       - run: pnpm test:e2e:rust
 
+  # ---- Ruby SDK ----
+
+  # The generated SDK claims Ruby 3.2+: the runtime's own suite runs on 3.2 and on the latest release.
+  runtime-ruby:
+    name: runtime-ruby (${{ matrix.ruby }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ['3.2', ruby]
+    defaults:
+      run:
+        working-directory: runtimes/ruby
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+      - run: ruby -v && ruby -w -Itest test/all.rb
+      - if: matrix.ruby == 'ruby'
+        run: |
+          gem install rbs --no-document
+          rbs -r json -r net-http -r time -r date -r uri -r securerandom -I sig -I src validate
+
+  # Generates the edge-cases SDK and runs the minitest suite in e2e/ruby against the shared mock server.
+  e2e-ruby:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-workspace
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+      - run: pnpm test:e2e:ruby
+
   # Single required check for branch protection; add new jobs to `needs`.
   ci-ok:
     if: always()
@@ -327,6 +370,8 @@ jobs:
       - e2e-rust
       - runtime-go
       - e2e-go
+      - runtime-ruby
+      - e2e-ruby
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

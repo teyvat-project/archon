@@ -1,0 +1,15 @@
+{
+  "name": "@natsuneko-laboratory/archon-e2e-ruby",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node scripts/run.mjs",
+    "generate": "node scripts/generate.mjs"
+  },
+  "devDependencies": {
+    "@natsuneko-laboratory/archon": "workspace:*",
+    "@natsuneko-laboratory/archon-e2e-mock-server": "workspace:*",
+    "jiti": "^2.7.0"
+  }
+}

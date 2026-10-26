@@ -1,0 +1,3 @@
+# The namespace the runtime is written in (generated SDKs replace Archon::Core with <Module>::Core).
+module Archon
+end
