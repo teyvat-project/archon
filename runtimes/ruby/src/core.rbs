@@ -213,6 +213,7 @@ module Archon::Core
     def get: (param_location location, String name) -> json
     def json_body: (untyped value) -> self
     def form_body: (untyped value) -> self
+    def multipart_body: (untyped value) -> self
     def text_body: (untyped value) -> self
     def binary_body: (Upload | String value) -> self
     def body: (Body value) -> self

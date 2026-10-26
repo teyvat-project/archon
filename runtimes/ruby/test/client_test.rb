@@ -57,6 +57,23 @@ class ClientTest < Minitest::Test
     ].join.b, first.body
   end
 
+  def test_builds_multipart_bodies_from_models_and_hashes
+    upload = Core::Upload.new('abc', filename: 'a.txt')
+    op = operation(http_method: 'POST', body: :multipart)
+    client.call(op, values.multipart_body({ title: 'hi', n: nil, file: upload, files: [upload, upload], tags: %w[x y] }))
+    body = @server.last.body
+    assert_equal 1, body.scan('name="title"').size
+    assert_equal 0, body.scan('name="n"').size
+    assert_equal 3, body.scan('filename="a.txt"').size
+    assert_equal 2, body.scan('name="tags"').size
+    client.call(op, values.multipart_body(ModelFixtures::Circle.new(radius: 2)))
+    assert_includes @server.last.body, "name=\"radius\"\r\n\r\n2\r\n"
+    form = Core::FormBody.new.add('a', 'b')
+    client.call(operation(http_method: 'POST', body: :form), values.form_body(form))
+    assert_equal 'a=b', @server.last.body
+    assert_raises(ArgumentError) { values.multipart_body(1) }
+  end
+
   def test_sends_text_binary_and_streamed_bodies
     client.call(operation(http_method: 'POST', body: :text), values.text_body('héllo'))
     assert_equal 'héllo'.b, @server.last.body

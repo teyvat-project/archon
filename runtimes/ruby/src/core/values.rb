@@ -24,14 +24,38 @@ module Archon::Core
       self
     end
 
-    # An application/x-www-form-urlencoded body from the JSON properties of a model or Hash.
+    # An application/x-www-form-urlencoded body from the JSON properties of a model or Hash (or a FormBody).
     def form_body(value)
+      return body(value) if value.is_a?(FormBody)
+
       object = Json.encode(value)
       raise ArgumentError, 'a form body must be a JSON object (a model or a Hash)' unless object.is_a?(Hash)
 
       form = FormBody.from_json(object)
       @body = ->(_) { form }
       self
+    end
+
+    # A multipart/form-data body from a model or a Hash (or a MultipartBody): Uploads (and arrays of them) become
+    # file parts, other values text parts (see MultipartBody#field); nils are skipped.
+    def multipart_body(value)
+      return body(value) if value.is_a?(MultipartBody)
+
+      parts =
+        case value
+        when Model then value.class.json_fields.map { |field| [field.wire, value.public_send(field.name)] }
+        when Hash then value.map { |name, item| [name.to_s, item] }
+        else raise ArgumentError, 'a multipart body must be a model, a Hash or a MultipartBody'
+        end
+      multipart = MultipartBody.new
+      parts.each do |name, item|
+        if item.is_a?(Upload) || (item.is_a?(Array) && !item.empty? && item.all?(Upload))
+          multipart.files(name, Array(item))
+        else
+          multipart.field(name, item)
+        end
+      end
+      body(multipart)
     end
 
     # A text body.

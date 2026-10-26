@@ -112,7 +112,7 @@ function pointerFields(ir: IRDocument, resolver: GoTypeResolver): Set<string> {
  * one (`U1 = U2 | string`, `U2 = U1 | int`) would make UnmarshalJSON recurse forever on the same JSON, so such a
  * variant is replaced by its own variants (recursively, skipping the cycle).
  */
-function readVariants(schemaName: string, schema: UnionSchema, resolver: GoTypeResolver): IRSchema[] {
+export function readVariants(schemaName: string, schema: UnionSchema, resolver: { schema(name: string): IRSchema | undefined }): IRSchema[] {
   if (schema.discriminator) return schema.variants;
   const untagged = (s: IRSchema): UnionSchema | undefined => {
     if (s.kind !== 'ref') return undefined;

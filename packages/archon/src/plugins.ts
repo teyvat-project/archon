@@ -10,3 +10,5 @@ export { typescript } from './plugins/typescript/index.js';
 export type { NamingRule, TypeScriptPluginAPI, TypeScriptPluginOptions } from './plugins/typescript/index.js';
 export { rust } from './plugins/rust/index.js';
 export type { RustPluginAPI, RustPluginOptions } from './plugins/rust/index.js';
+export { ruby } from './plugins/ruby/index.js';
+export type { RubyPluginAPI, RubyPluginOptions } from './plugins/ruby/index.js';
