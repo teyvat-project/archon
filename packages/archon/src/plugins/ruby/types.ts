@@ -8,7 +8,7 @@ import type { RubyNames } from './names.js';
  * A Ruby type: `expr` is the Core::Types expression that reads and writes it, `rbs` its RBS type, `doc` its YARD type,
  * and `model` the constant of the object model it is (for `coerce`).
  */
-export type RubyType = { expr: string; rbs: string; doc: string; model?: string };
+export type RubyType = { expr: string; rbs: string; doc: string; model?: string; enumModule?: string };
 
 /** A type mapping: a built-in type name, or a Core::Types expression with its RBS type. */
 export type RubyTypeMapping = BuiltinType | { type: string; rbs?: string; doc?: string };
@@ -88,7 +88,7 @@ export class RubyTypeResolver {
         }
         if (target.kind === 'enum') {
           const base = target.base === 'string' ? BUILTIN.string : target.base === 'integer' ? BUILTIN.integer : BUILTIN.number;
-          return { ...base, doc: `${base.doc} (${name})` };
+          return { ...base, enumModule: name };
         }
         if (target.kind === 'union') return { expr: `Core::Types.ref(-> { ${name} })`, rbs: `${name}::t`, doc: name };
         if (isDeclared(target)) return { expr: `Core::Types.ref(-> { ${name} })`, rbs: name, doc: name, model: name };

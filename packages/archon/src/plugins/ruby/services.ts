@@ -5,7 +5,7 @@ import { applyTemplate, toCase, UniqueNamer } from '../../writer/naming.js';
 import { selectOperations as selectCsOperations } from '../csharp/services.js';
 import { docLines, rbFile, rbString, writeList } from './emit.js';
 import type { RubyPluginOptions } from './index.js';
-import { withDeprecation, withDeprecationNote } from './models.js';
+import { withDeprecation, withDeprecationNote, withEnumNote } from './models.js';
 import { constant, rubyIdentifier, screaming, type RubyNames } from './names.js';
 import { CLIENT_MEMBERS, OPERATION_LOCALS } from './reserved.js';
 import { optional, type RubyType, type RubyTypeResolver } from './types.js';
@@ -146,7 +146,7 @@ function renderOperation(
   w.line('#');
   if (body) w.line(`# @param body [${bodyDoc(body)}]${body.required ? '' : ' (optional)'}`);
   for (const p of params) {
-    const description = docLines(withDeprecationNote(p.ir.description ?? p.ir.schema.description, p.ir.deprecated));
+    const description = docLines(withEnumNote(withDeprecationNote(p.ir.description ?? p.ir.schema.description, p.ir.deprecated), p.type));
     const type = p.type.model ? `${p.type.doc}, ::Hash` : p.type.doc;
     w.line(`# @param ${p.name} [${p.required ? type : `${type}, nil`}]${description[0] ? ` ${description[0]}` : ''}`);
     for (const line of description.slice(1)) w.line(line === '' ? '#' : `#   ${line}`);

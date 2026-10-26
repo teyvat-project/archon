@@ -26,6 +26,13 @@ export function withDeprecationNote(text: string | undefined, deprecated: boolea
   return text === undefined || text.trim() === '' ? 'Deprecated in the API.' : `${text.trimEnd()} (deprecated in the API)`;
 }
 
+/** A description followed by the enum module the value comes from, if any. */
+export function withEnumNote(text: string | undefined, type: RubyType): string | undefined {
+  if (type.enumModule === undefined) return text;
+  const note = `(see ${type.enumModule})`;
+  return text === undefined || text.trim() === '' ? note : `${text.trimEnd()} ${note}`;
+}
+
 /** One member of a model. */
 export type Member = { wire: string; name: string; type: RubyType; required: boolean; nullable: boolean; tag?: string; description?: string; deprecated?: boolean };
 
@@ -129,7 +136,7 @@ function renderObject(c: Context, w: CodeWriter, schemaName: string, schema: Obj
     w.blank();
     for (const m of list) {
       const type = memberType(m);
-      const description = withDeprecationNote(m.description, m.deprecated);
+      const description = withEnumNote(withDeprecationNote(m.description, m.deprecated), m.type);
       const lines = description === undefined ? [] : description.split('\n');
       w.line(`# @param ${m.name} [${type.doc}]${lines[0] ? ` ${lines[0].trimEnd()}` : ''}`);
       for (const line of lines.slice(1)) w.line(line.trim() === '' ? '#' : `#   ${line.trimEnd()}`);
