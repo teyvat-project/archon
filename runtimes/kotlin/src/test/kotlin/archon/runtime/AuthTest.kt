@@ -207,6 +207,65 @@ class AuthTest {
     }
 
     @Test
+    fun sendsOptionalAuthAnonymouslyWithoutCredentials() = runBlocking<Unit> {
+        TestServer.start { TestResponse(200, "ok") }.use { server ->
+            call(core(server.url, emptyMap()), req("bearer"), req())
+            assertEquals(null, server.last.header("authorization"))
+        }
+    }
+
+    @Test
+    fun readsCredentialsOncePerSend() = runBlocking<Unit> {
+        // Credentials cleared on another thread between selecting the requirement and applying it (a logout during a
+        // send): the send keeps what it selected with instead of throwing NullPointerException.
+        for (optional in listOf(true, false)) {
+            TestServer.start { TestResponse(200, "ok") }.use { server ->
+                val auth = ClearedAfterFirstRead(mapOf("bearer" to TokenValue("t")))
+                val core = TestApi.core(server.url, schemes) { this.auth = auth }
+                if (optional) call(core, req("bearer"), req()) else call(core, req("bearer"))
+                assertEquals("Bearer t", server.last.header("authorization"))
+                assertEquals(1, auth.reads.get())
+            }
+        }
+    }
+
+    @Test
+    fun reappliesFromTheSameCredentialsOn401() = runBlocking<Unit> {
+        val issued = AtomicInteger()
+        TestServer.start {
+            when {
+                it.target == "/oauth/token" -> TestResponse.json(200, "{\"access_token\":\"at${issued.incrementAndGet()}\",\"expires_in\":3600}")
+                it.header("authorization") == "Bearer at2" -> TestResponse(200, "ok")
+                else -> TestResponse(401, "no")
+            }
+        }.use { server ->
+            val auth = ClearedAfterFirstRead(mapOf("oauth" to OAuth2Value(clientCredentials = OAuth2ClientCredentials("id", "secret"))))
+            val core = TestApi.core(server.url, schemes) { this.auth = auth }
+            assertEquals("ok", call(core, req("oauth")).data)
+            assertEquals(1, auth.reads.get())
+        }
+    }
+
+    @Test
+    fun clearedCredentialsApplyToTheNextSend() = runBlocking<Unit> {
+        TestServer.start { TestResponse(200, "ok") }.use { server ->
+            val auth = ClearedAfterFirstRead(mapOf("bearer" to TokenValue("t")))
+            val core = TestApi.core(server.url, schemes) { this.auth = auth }
+            call(core, req("bearer"))
+            call(core, req("bearer"), req())
+            assertEquals(null, server.last.header("authorization"))
+            assertFailsWith<ApiAuthException> { call(core, req("bearer")) }
+        }
+    }
+
+    /** Returns the configured values on the first read only, as if they were cleared right after it. */
+    private class ClearedAfterFirstRead(private val values: Map<String, Any?>) : AuthConfig {
+        val reads = AtomicInteger()
+
+        override fun get(scheme: String): Any? = if (reads.incrementAndGet() == 1) values[scheme] else null
+    }
+
+    @Test
     fun customAuthCoversUnknownScheme() = runBlocking<Unit> {
         TestServer.start { TestResponse(200, "ok") }.use { server ->
             val core = core(server.url, emptyMap()) { customAuth = { request, _ -> request.headers["Authorization"] = "Digest x" } }

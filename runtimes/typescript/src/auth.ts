@@ -39,6 +39,23 @@ function isOAuth2Value(value: AuthEntry): value is OAuth2Value {
   return v.accessToken !== undefined || v.clientCredentials !== undefined || v.refreshToken !== undefined;
 }
 
+/** The auth settings of one send; each scheme's entry is read on first use and then kept. */
+interface AuthSnapshot {
+  config: ClientConfig<any>;
+  entry(scheme: string): AuthEntry;
+}
+
+function snapshot(config: ClientConfig<any>): AuthSnapshot {
+  const entries = new Map<string, AuthEntry>();
+  return {
+    config,
+    entry(scheme) {
+      if (!entries.has(scheme)) entries.set(scheme, (config.auth as Record<string, AuthEntry> | undefined)?.[scheme]);
+      return entries.get(scheme);
+    },
+  };
+}
+
 function resolveValue<T>(value: T | (() => T | Promise<T>)): T | Promise<T> {
   return typeof value === 'function' ? (value as () => T | Promise<T>)() : value;
 }
@@ -79,12 +96,12 @@ export function createAuthMiddleware(getConfig: () => ClientConfig<any>): Middle
     return configured ? configured(input, init) : fetch(input, init);
   };
 
-  function isConfigured(config: ClientConfig<any>, scheme: string): boolean {
+  function isConfigured({ config, entry }: AuthSnapshot, scheme: string): boolean {
     const spec = config.securitySchemes[scheme];
     // Schemes the generator cannot apply (http digest, mutualTLS, ...) are left out of securitySchemes;
     // `customAuth` is responsible for them.
     if (spec === undefined) return config.customAuth !== undefined;
-    const value = (config.auth as Record<string, AuthEntry> | undefined)?.[scheme];
+    const value = entry(scheme);
     if (value === undefined) return false;
     return spec.type === 'oauth2' || spec.type === 'openIdConnect' ? isOAuth2Value(value) : true;
   }
@@ -118,7 +135,7 @@ export function createAuthMiddleware(getConfig: () => ClientConfig<any>): Middle
 
   /** Applies the requirement to `req`; returns each manager used with the token it supplied. */
   async function apply(
-    config: ClientConfig<any>,
+    { config, entry }: AuthSnapshot,
     requirement: SecurityRequirement,
     req: ApiRequest,
   ): Promise<{ manager: OAuth2TokenManager; token: string }[]> {
@@ -126,7 +143,7 @@ export function createAuthMiddleware(getConfig: () => ClientConfig<any>): Middle
     for (const { scheme, scopes } of requirement) {
       const spec = config.securitySchemes[scheme];
       if (spec === undefined) continue; // left to customAuth
-      const value = (config.auth as Record<string, AuthEntry>)[scheme];
+      const value = entry(scheme);
       switch (spec.type) {
         case 'http': {
           if (spec.scheme === 'bearer') {
@@ -165,16 +182,18 @@ export function createAuthMiddleware(getConfig: () => ClientConfig<any>): Middle
   }
 
   return async (req: ApiRequest, next, ctx: CallContext) => {
-    const config = getConfig();
-    const selection = selectRequirement(ctx.security, (scheme) => isConfigured(config, scheme));
+    // One snapshot per send: selecting the requirement, applying it and re-applying it on 401 must all see the same
+    // credentials, even if the auth object is changed in the meantime (a logout).
+    const auth = snapshot(getConfig());
+    const selection = selectRequirement(ctx.security, (scheme) => isConfigured(auth, scheme));
     if (selection.kind === 'missing') {
       throw new AuthError(`Missing credentials for security scheme(s): ${selection.schemes.join(', ')}`, selection.schemes);
     }
     const requirement = selection.kind === 'apply' ? selection.requirement : [];
 
     const send = async (): Promise<ApiRequest> => {
-      const used = await apply(config, requirement, req);
-      await config.customAuth?.(req, ctx);
+      const used = await apply(auth, requirement, req);
+      await auth.config.customAuth?.(req, ctx);
       sent = used;
       return req;
     };

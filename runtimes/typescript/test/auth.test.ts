@@ -106,6 +106,16 @@ function setup(config: Partial<ClientConfig<any>>, security: SecurityRequirement
   };
 }
 
+/** Auth whose entries are returned on the first read only, as if they were cleared right after it. */
+function clearedAfterFirstRead(entries: Record<string, unknown>) {
+  const state = { reads: 0 };
+  const auth = {};
+  for (const [scheme, value] of Object.entries(entries)) {
+    Object.defineProperty(auth, scheme, { enumerable: true, get: () => (++state.reads === 1 ? value : undefined) });
+  }
+  return { auth, state };
+}
+
 describe('createAuthMiddleware', () => {
   it('applies bearer from async provider', async () => {
     const t = setup({ auth: { bearer: async () => 'tok' } }, [req_('bearer')]);
@@ -215,6 +225,26 @@ describe('createAuthMiddleware', () => {
     const t2 = setup({ auth: {} }, [req_('bearer'), []]);
     await t2.mw(makeReq(), t2.next, t2.ctx);
     expect(t2.seen[0]!.headers.has('authorization')).toBe(false);
+  });
+
+  it.each([true, false])('reads credentials once per send (optional: %s)', async (optional) => {
+    // Credentials cleared between selecting the requirement and applying it (a logout during a send): the send
+    // keeps what it selected with.
+    const { auth, state } = clearedAfterFirstRead({ bearer: 't' });
+    const t = setup({ auth }, optional ? [req_('bearer'), []] : [req_('bearer')]);
+    await t.mw(makeReq(), t.next, t.ctx);
+    expect(t.seen[0]!.headers.get('authorization')).toBe('Bearer t');
+    expect(state.reads).toBe(1);
+  });
+
+  it('applies cleared credentials to the next send', async () => {
+    const { auth } = clearedAfterFirstRead({ bearer: 't' });
+    const t = setup({ auth }, [req_('bearer'), []]);
+    await t.mw(makeReq(), t.next, t.ctx);
+    await t.mw(makeReq(), t.next, t.ctx);
+    expect(t.seen[1]!.headers.get('authorization')).toBeNull();
+    const required = setup({ auth }, [req_('bearer')]);
+    await expect(required.mw(makeReq(), required.next, required.ctx)).rejects.toBeInstanceOf(AuthError);
   });
 
   it('re-applies fresh token on re-entry', async () => {
@@ -454,6 +484,16 @@ describe('createAuthMiddleware', () => {
       expect(server.calls).toHaveLength(2);
       // the first 401 body was cancelled/drained before retrying
       expect(bodies[0]!.bodyUsed).toBe(true);
+    });
+
+    it('re-applies from the same credentials on 401', async () => {
+      const server = tokenServer(['stale', 'fresh']);
+      const { auth, state } = clearedAfterFirstRead({ oauth: { clientCredentials: cc } });
+      const t = setup({ auth, fetch: server.fetch }, [req_('oauth')]);
+      const next: Next = async (r: ApiRequest) =>
+        new Response('', { status: r.headers.get('authorization') === 'Bearer fresh' ? 200 : 401 });
+      expect((await t.mw(makeReq(), next, t.ctx)).status).toBe(200);
+      expect(state.reads).toBe(1);
     });
 
     it('N parallel 401s with the same stale token trigger exactly one extra token request', async () => {

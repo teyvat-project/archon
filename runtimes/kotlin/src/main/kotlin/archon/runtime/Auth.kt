@@ -2,6 +2,7 @@ package archon.runtime
 
 import io.ktor.client.HttpClient
 import kotlin.io.encoding.Base64
+import kotlin.time.Duration
 
 /** A bearer token or API key: a fixed string or a provider called on every send. */
 public class TokenValue(private val provider: suspend () -> String) {
@@ -106,27 +107,29 @@ internal class AuthMiddleware(private val core: ApiClientCore) : Middleware {
     private var managers = HashMap<String, Pair<OAuth2Value, OAuth2TokenManager>>()
 
     override suspend fun intercept(request: ApiRequest, next: suspend (ApiRequest) -> ApiResponse, context: CallContext): ApiResponse {
-        val options = core.options
-        val selection = SecuritySelector.select(context.security) { isConfigured(options, it) }
+        // One snapshot per send: the options can change on another thread (a logout), and selecting the requirement,
+        // applying it and re-applying it on 401 must all see the same credentials.
+        val auth = AuthSnapshot(core.options)
+        val selection = SecuritySelector.select(context.security) { isConfigured(auth, it) }
         if (selection is Selection.Missing) {
             throw ApiAuthException(selection.schemes, "Missing credentials for security scheme(s): ${selection.schemes.joinToString(", ")}.")
         }
         val requirement = (selection as? Selection.Apply)?.requirement
 
-        val used = apply(options, requirement, request, context)
+        val used = apply(auth, requirement, request, context)
         val response = next(request)
         if (response.statusCode != 401 || used.isEmpty() || !request.replayable) return response
 
         for ((manager, token) in used) manager.invalidate(token)
-        apply(options, requirement, request, context)
+        apply(auth, requirement, request, context)
         return next(request)
     }
 
-    private fun isConfigured(options: ClientOptions, scheme: String): Boolean {
+    private fun isConfigured(auth: AuthSnapshot, scheme: String): Boolean {
         // Schemes the generator cannot apply (http digest, mutualTLS, ...) are left out of the scheme table;
         // customAuth is responsible for them.
-        val spec = core.securitySchemes[scheme] ?: return options.customAuth != null
-        return when (val value = options.authConfig?.get(scheme)) {
+        val spec = core.securitySchemes[scheme] ?: return auth.customAuth != null
+        return when (val value = auth[scheme]) {
             is OAuth2Value -> (spec is SecuritySchemeSpec.OAuth2 || spec is SecuritySchemeSpec.OpenIdConnect) && value.isConfigured
             is TokenValue -> spec is SecuritySchemeSpec.HttpBearer || spec is SecuritySchemeSpec.ApiKey
             is BasicValue -> spec is SecuritySchemeSpec.HttpBasic
@@ -136,7 +139,7 @@ internal class AuthMiddleware(private val core: ApiClientCore) : Middleware {
 
     /** Applies the requirement; returns each token manager used with the token it supplied. */
     private suspend fun apply(
-        options: ClientOptions,
+        auth: AuthSnapshot,
         requirement: SecurityRequirement?,
         request: ApiRequest,
         context: CallContext,
@@ -144,7 +147,7 @@ internal class AuthMiddleware(private val core: ApiClientCore) : Middleware {
         val used = ArrayList<Pair<OAuth2TokenManager, String>>()
         for (scheme in requirement?.schemes.orEmpty()) {
             val spec = core.securitySchemes[scheme.name] ?: continue // left to customAuth
-            val value = options.authConfig?.get(scheme.name)
+            val value = auth[scheme.name]
             when (spec) {
                 SecuritySchemeSpec.HttpBearer -> request.headers["Authorization"] = "Bearer ${(value as TokenValue).get()}"
                 SecuritySchemeSpec.HttpBasic -> {
@@ -161,33 +164,47 @@ internal class AuthMiddleware(private val core: ApiClientCore) : Middleware {
                 }
                 is SecuritySchemeSpec.OAuth2, SecuritySchemeSpec.OpenIdConnect -> {
                     val oauth = value as OAuth2Value
-                    val token = oauth.accessToken?.get() ?: managerFor(options, scheme.name, spec, oauth).let { manager ->
+                    val token = oauth.accessToken?.get() ?: managerFor(auth, scheme.name, spec, oauth).let { manager ->
                         manager.getToken(scheme.scopes).also { used.add(manager to it) }
                     }
                     request.headers["Authorization"] = "Bearer $token"
                 }
             }
         }
-        options.customAuth?.invoke(request, context)
+        auth.customAuth?.invoke(request, context)
         return used
     }
 
-    private fun managerFor(options: ClientOptions, scheme: String, spec: SecuritySchemeSpec, value: OAuth2Value): OAuth2TokenManager {
+    private fun managerFor(auth: AuthSnapshot, scheme: String, spec: SecuritySchemeSpec, value: OAuth2Value): OAuth2TokenManager {
         val http = core.httpClient
         synchronized(lock) {
             val current = managersFor
-            val auth = options.authConfig
-            if (current == null || current.auth !== auth || current.baseUrl != options.baseUrl || current.http !== http) {
+            if (current == null || current.auth !== auth.config || current.baseUrl != auth.baseUrl || current.http !== http) {
                 managers = HashMap()
-                managersFor = ManagersKey(auth, options.baseUrl, http)
+                managersFor = ManagersKey(auth.config, auth.baseUrl, http)
             }
             // A scheme's value can be replaced on the same AuthConfig (settings are read on every request): a manager
             // serves only the value it was built from.
             managers[scheme]?.takeIf { it.first === value }?.let { return it.second }
             val specUrl = (spec as? SecuritySchemeSpec.OAuth2)?.let { if (value.refreshToken != null) it.refreshUrl ?: it.tokenUrl else it.tokenUrl }
-            val manager = OAuth2TokenManager(http, value, specUrl, options.baseUrl, scheme, timeout = options.timeout)
+            val manager = OAuth2TokenManager(http, value, specUrl, auth.baseUrl, scheme, timeout = auth.timeout)
             managers[scheme] = value to manager
             return manager
+        }
+    }
+
+    /** The auth settings of one send, read once; each scheme's value is resolved on first use and then kept. */
+    private class AuthSnapshot(options: ClientOptions) {
+        val config: AuthConfig? = options.authConfig
+        val customAuth: (suspend (ApiRequest, CallContext) -> Unit)? = options.customAuth
+        val baseUrl: String = options.baseUrl
+        val timeout: Duration? = options.timeout
+        private val values = HashMap<String, Any?>()
+
+        // Not getOrPut: it would read again for a scheme whose value is null.
+        operator fun get(scheme: String): Any? {
+            if (scheme !in values) values[scheme] = config?.get(scheme)
+            return values[scheme]
         }
     }
 
