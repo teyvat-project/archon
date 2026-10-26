@@ -153,11 +153,14 @@ type usedToken struct {
 }
 
 func (a *authState) intercept(req *Request, next Next, ctx *CallContext) (*Response, error) {
-	sel := selectSecurity(ctx.Security, a.isConfigured)
+	// One snapshot per send: Auth can change on another goroutine (a logout), and selecting the requirement,
+	// applying it and re-applying it on 401 must all see the same credentials.
+	creds := &authSnapshot{auth: a.client.options.Auth}
+	sel := selectSecurity(ctx.Security, func(scheme string) bool { return a.isConfigured(creds, scheme) })
 	if sel.missing != nil {
 		return nil, missingCredentials(sel.missing)
 	}
-	used, err := a.apply(req, sel.requirement, ctx)
+	used, err := a.apply(creds, req, sel.requirement, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -168,27 +171,41 @@ func (a *authState) intercept(req *Request, next Next, ctx *CallContext) (*Respo
 	for _, u := range used {
 		u.manager.Invalidate(u.token)
 	}
-	if _, err := a.apply(req, sel.requirement, ctx); err != nil {
+	if _, err := a.apply(creds, req, sel.requirement, ctx); err != nil {
 		return nil, err
 	}
 	return next(req)
 }
 
-func (a *authState) value(scheme string) any {
-	if auth := a.client.options.Auth; auth != nil {
-		return auth.Get(scheme)
-	}
-	return nil
+// authSnapshot holds the credentials of one send: each scheme's value is read on first use and then kept.
+type authSnapshot struct {
+	auth   AuthConfig
+	values map[string]any
 }
 
-func (a *authState) isConfigured(scheme string) bool {
+func (s *authSnapshot) value(scheme string) any {
+	if value, ok := s.values[scheme]; ok {
+		return value
+	}
+	var value any
+	if s.auth != nil {
+		value = s.auth.Get(scheme)
+	}
+	if s.values == nil {
+		s.values = map[string]any{}
+	}
+	s.values[scheme] = value
+	return value
+}
+
+func (a *authState) isConfigured(creds *authSnapshot, scheme string) bool {
 	spec, ok := a.client.schemes[scheme]
 	if !ok {
 		// Schemes the generator cannot apply (http digest, mutualTLS, ...) are left out of the scheme table;
 		// CustomAuth is responsible for them.
 		return a.client.options.CustomAuth != nil
 	}
-	switch v := a.value(scheme).(type) {
+	switch v := creds.value(scheme).(type) {
 	case *OAuth2:
 		return (spec.Kind == SchemeOAuth2 || spec.Kind == SchemeOpenIDConnect) && v.configured()
 	case TokenProvider:
@@ -200,7 +217,7 @@ func (a *authState) isConfigured(scheme string) bool {
 }
 
 // apply applies the requirement; it returns each token manager used with the token it supplied.
-func (a *authState) apply(req *Request, requirement SecurityRequirement, ctx *CallContext) ([]usedToken, error) {
+func (a *authState) apply(creds *authSnapshot, req *Request, requirement SecurityRequirement, ctx *CallContext) ([]usedToken, error) {
 	var used []usedToken
 	for _, scheme := range requirement {
 		spec, ok := a.client.schemes[scheme.Name]
@@ -219,19 +236,19 @@ func (a *authState) apply(req *Request, requirement SecurityRequirement, ctx *Ca
 		}
 		switch spec.Kind {
 		case SchemeHTTPBearer:
-			token, err := a.value(scheme.Name).(TokenProvider).Token(ctx.Context)
+			token, err := creds.value(scheme.Name).(TokenProvider).Token(ctx.Context)
 			if err != nil {
 				return nil, fail(err)
 			}
 			req.Header.Set("Authorization", "Bearer "+token)
 		case SchemeHTTPBasic:
-			basic, err := a.value(scheme.Name).(BasicProvider).Credentials(ctx.Context)
+			basic, err := creds.value(scheme.Name).(BasicProvider).Credentials(ctx.Context)
 			if err != nil {
 				return nil, fail(err)
 			}
 			req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(basic.Username+":"+basic.Password)))
 		case SchemeAPIKey:
-			key, err := a.value(scheme.Name).(TokenProvider).Token(ctx.Context)
+			key, err := creds.value(scheme.Name).(TokenProvider).Token(ctx.Context)
 			if err != nil {
 				return nil, fail(err)
 			}
@@ -244,7 +261,7 @@ func (a *authState) apply(req *Request, requirement SecurityRequirement, ctx *Ca
 				setCookie(req.Header, spec.Name, encodeComponent(key))
 			}
 		case SchemeOAuth2, SchemeOpenIDConnect:
-			oauth := a.value(scheme.Name).(*OAuth2)
+			oauth := creds.value(scheme.Name).(*OAuth2)
 			var token string
 			var err error
 			if oauth.AccessToken != nil {

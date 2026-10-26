@@ -144,6 +144,69 @@ public class AuthTests
     }
 
     [Fact]
+    public async Task SendsOptionalAuthAnonymouslyWithoutCredentials()
+    {
+        using var server = TestServer.Start(_ => new TestResponse(200, "ok"));
+        var core = Core(server.Url, new());
+        await Call(core, Req("bearer"), Req());
+        Assert.Null(server.Last.Header("authorization"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReadsCredentialsOncePerSend(bool optional)
+    {
+        // Credentials cleared on another thread between selecting the requirement and applying it (a logout during a
+        // send): the send keeps what it selected with instead of throwing NullReferenceException.
+        using var server = TestServer.Start(_ => new TestResponse(200, "ok"));
+        var auth = new ClearedAfterFirstRead(new() { ["bearer"] = (TokenValue)"t" });
+        var core = TestApi.Core(server.Url, o => o.Auth = auth, Schemes);
+        await (optional ? Call(core, Req("bearer"), Req()) : Call(core, Req("bearer")));
+        Assert.Equal("Bearer t", server.Last.Header("authorization"));
+        Assert.Equal(1, auth.Reads);
+    }
+
+    [Fact]
+    public async Task ReappliesFromTheSameCredentialsOn401()
+    {
+        var issued = 0;
+        using var server = TestServer.Start(r =>
+        {
+            if (r.Target == "/oauth/token") return TestResponse.Json(200, $"{{\"access_token\":\"at{++issued}\",\"expires_in\":3600}}");
+            return r.Header("authorization") == "Bearer at2" ? new TestResponse(200, "ok") : new TestResponse(401, "no");
+        });
+        var auth = new ClearedAfterFirstRead(new()
+        {
+            ["oauth"] = new OAuth2Value { ClientCredentials = new() { ClientId = "id", ClientSecret = "secret" } },
+        });
+        var core = TestApi.Core(server.Url, o => o.Auth = auth, Schemes);
+        var result = await Call(core, Req("oauth"));
+        Assert.Equal("ok", result.Data);
+        Assert.Equal(1, auth.Reads);
+    }
+
+    [Fact]
+    public async Task ClearedCredentialsApplyToTheNextSend()
+    {
+        using var server = TestServer.Start(_ => new TestResponse(200, "ok"));
+        var auth = new ClearedAfterFirstRead(new() { ["bearer"] = (TokenValue)"t" });
+        var core = TestApi.Core(server.Url, o => o.Auth = auth, Schemes);
+        await Call(core, Req("bearer"));
+        await Call(core, Req("bearer"), Req());
+        Assert.Null(server.Last.Header("authorization"));
+        await Assert.ThrowsAsync<ApiAuthException>(() => Call(core, Req("bearer")));
+    }
+
+    /// <summary>Returns the configured values on the first read only, as if they were cleared right after it.</summary>
+    private sealed class ClearedAfterFirstRead(Dictionary<string, object?> values) : IAuthConfig
+    {
+        public int Reads { get; private set; }
+
+        public object? Get(string scheme) => ++Reads == 1 ? values.GetValueOrDefault(scheme) : null;
+    }
+
+    [Fact]
     public async Task CustomAuthCoversUnknownScheme()
     {
         using var server = TestServer.Start(_ => new TestResponse(200, "ok"));

@@ -110,6 +110,39 @@ func TestReappliesFreshCredentialsWhenMiddlewareSendsAgain(t *testing.T) {
 	}
 }
 
+// clearedAfterFirstRead returns its values on the first Get only, as if they were cleared right after it.
+type clearedAfterFirstRead struct {
+	values testAuth
+	reads  atomic.Int32
+}
+
+func (a *clearedAfterFirstRead) Get(scheme string) any {
+	if a.reads.Add(1) == 1 {
+		return a.values[scheme]
+	}
+	return nil
+}
+
+func TestReadsCredentialsOncePerSend(t *testing.T) {
+	// Credentials cleared on another goroutine between selecting the requirement and applying it (a logout during a
+	// send): the send keeps what it selected with instead of panicking.
+	for _, optional := range []bool{true, false} {
+		s := newTestServer(t, nil)
+		auth := &clearedAfterFirstRead{values: testAuth{"bearer": StaticToken("t")}}
+		c := NewClient(Options{BaseURL: s.URL, Auth: auth}, testSchemes)
+		op := authOp("bearer")
+		if optional {
+			op.Security = append(op.Security, SecurityRequirement{})
+		}
+		if _, _, err := Do(context.Background(), c, op, nil, DecodeNone, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		if got := s.last(t).Header.Get("Authorization"); got != "Bearer t" || auth.reads.Load() != 1 {
+			t.Errorf("optional %v: got %q after %d reads", optional, got, auth.reads.Load())
+		}
+	}
+}
+
 func TestCustomAuthCoversUnknownSchemes(t *testing.T) {
 	s := newTestServer(t, nil)
 	custom := func(req *Request, _ *CallContext) error {
@@ -282,6 +315,23 @@ func TestOAuth2RetriesOnceOn401AndRebuildsForANewValue(t *testing.T) {
 	}
 	if ts.issued.Load() != 3 {
 		t.Errorf("a replaced value must get its own manager (issued %d)", ts.issued.Load())
+	}
+}
+
+func TestOAuth2ReappliesFromTheSameCredentialsOn401(t *testing.T) {
+	ts := newTokenServer(t)
+	auth := &clearedAfterFirstRead{values: testAuth{"oauth2": &OAuth2{ClientCredentials: &OAuth2ClientCredentials{ClientID: "id", ClientSecret: "s"}}}}
+	c := NewClient(Options{BaseURL: ts.URL, Auth: auth}, testSchemes)
+	if _, _, err := Do(context.Background(), c, authOp("oauth2"), nil, DecodeNone, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	ts.valid.Delete("at-1") // revoked server-side, so the next send gets 401 and re-applies
+	auth.reads.Store(0)
+	if _, _, err := Do(context.Background(), c, authOp("oauth2"), nil, DecodeNone, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if ts.issued.Load() != 2 || auth.reads.Load() != 1 {
+		t.Errorf("issued %d after %d reads", ts.issued.Load(), auth.reads.Load())
 	}
 }
 

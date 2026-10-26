@@ -159,30 +159,32 @@ internal sealed class AuthMiddleware : IApiMiddleware
 
     public async Task<ApiResponse> InvokeAsync(ApiRequest request, ApiNext next, CallContext context, CancellationToken cancellationToken)
     {
-        var options = _core.Options;
-        var selection = SecuritySelector.Select(context.Security, scheme => IsConfigured(options, scheme));
+        // One snapshot per send: the options can change on another thread (a logout), and selecting the requirement,
+        // applying it and re-applying it on 401 must all see the same credentials.
+        var auth = new AuthSnapshot(_core.Options);
+        var selection = SecuritySelector.Select(context.Security, scheme => IsConfigured(auth, scheme));
         if (selection is Selection.Missing missing)
         {
             throw new ApiAuthException($"Missing credentials for security scheme(s): {string.Join(", ", missing.Schemes)}.", missing.Schemes);
         }
         var requirement = selection is Selection.Apply apply ? apply.Requirement : null;
 
-        var used = await ApplyAsync(options, requirement, request, context, cancellationToken).ConfigureAwait(false);
+        var used = await ApplyAsync(auth, requirement, request, context, cancellationToken).ConfigureAwait(false);
         var response = await next(request, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode != 401 || used.Count == 0 || !request.Replayable) return response;
 
         response.Dispose();
         foreach (var (manager, token) in used) manager.Invalidate(token);
-        await ApplyAsync(options, requirement, request, context, cancellationToken).ConfigureAwait(false);
+        await ApplyAsync(auth, requirement, request, context, cancellationToken).ConfigureAwait(false);
         return await next(request, cancellationToken).ConfigureAwait(false);
     }
 
-    private bool IsConfigured(ClientOptions options, string scheme)
+    private bool IsConfigured(AuthSnapshot auth, string scheme)
     {
         // Schemes the generator cannot apply (http digest, mutualTLS, ...) are left out of the scheme table;
         // CustomAuth is responsible for them.
-        if (!_core.SecuritySchemes.TryGetValue(scheme, out var spec)) return options.CustomAuth is not null;
-        return options.AuthConfig?.Get(scheme) switch
+        if (!_core.SecuritySchemes.TryGetValue(scheme, out var spec)) return auth.CustomAuth is not null;
+        return auth.Get(scheme) switch
         {
             null => false,
             OAuth2Value oauth => spec is SecuritySchemeSpec.OAuth2 or SecuritySchemeSpec.OpenIdConnect && oauth.IsConfigured,
@@ -194,13 +196,13 @@ internal sealed class AuthMiddleware : IApiMiddleware
 
     /// <summary>Applies the requirement; returns each token manager used with the token it supplied.</summary>
     private async Task<List<(OAuth2TokenManager Manager, string Token)>> ApplyAsync(
-        ClientOptions options, SecurityRequirement? requirement, ApiRequest request, CallContext context, CancellationToken cancellationToken)
+        AuthSnapshot auth, SecurityRequirement? requirement, ApiRequest request, CallContext context, CancellationToken cancellationToken)
     {
         var used = new List<(OAuth2TokenManager, string)>();
         foreach (var scheme in requirement?.Schemes ?? [])
         {
             if (!_core.SecuritySchemes.TryGetValue(scheme.Name, out var spec)) continue; // left to CustomAuth
-            var value = options.AuthConfig?.Get(scheme.Name);
+            var value = auth.Get(scheme.Name);
             switch (spec)
             {
                 case SecuritySchemeSpec.HttpBearer:
@@ -234,7 +236,7 @@ internal sealed class AuthMiddleware : IApiMiddleware
                     }
                     else
                     {
-                        var manager = ManagerFor(options, scheme.Name, spec, oauth);
+                        var manager = ManagerFor(auth, scheme.Name, spec, oauth);
                         token = await manager.GetTokenAsync(scheme.Scopes, cancellationToken).ConfigureAwait(false);
                         used.Add((manager, token));
                     }
@@ -242,15 +244,16 @@ internal sealed class AuthMiddleware : IApiMiddleware
                     break;
             }
         }
-        if (options.CustomAuth is { } custom) await custom(request, context, cancellationToken).ConfigureAwait(false);
+        if (auth.CustomAuth is { } custom) await custom(request, context, cancellationToken).ConfigureAwait(false);
         return used;
     }
 
-    private OAuth2TokenManager ManagerFor(ClientOptions options, string scheme, SecuritySchemeSpec spec, OAuth2Value value)
+    private OAuth2TokenManager ManagerFor(AuthSnapshot auth, string scheme, SecuritySchemeSpec spec, OAuth2Value value)
     {
         lock (_lock)
         {
-            var key = (options.AuthConfig, options.BaseUrl, new HttpClientIdentity(_core.HttpClient));
+            var http = _core.HttpClient;
+            var key = (auth.Config, auth.BaseUrl, new HttpClientIdentity(http));
             if (!Equals(_managersFor, key))
             {
                 _managers = [];
@@ -260,8 +263,8 @@ internal sealed class AuthMiddleware : IApiMiddleware
             // serves only the value it was built from.
             if (_managers.TryGetValue(scheme, out var cached) && ReferenceEquals(cached.Value, value)) return cached.Manager;
             var specUrl = spec is SecuritySchemeSpec.OAuth2 o ? (value.RefreshToken is not null ? o.RefreshUrl ?? o.TokenUrl : o.TokenUrl) : null;
-            Uri? baseUrl = Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var parsed) ? parsed : null;
-            var manager = new OAuth2TokenManager(_core.HttpClient, value, specUrl, baseUrl, scheme, timeout: options.Timeout);
+            Uri? baseUrl = Uri.TryCreate(auth.BaseUrl, UriKind.Absolute, out var parsed) ? parsed : null;
+            var manager = new OAuth2TokenManager(http, value, specUrl, baseUrl, scheme, timeout: auth.Timeout);
             _managers[scheme] = (value, manager);
             return manager;
         }
@@ -272,6 +275,26 @@ internal sealed class AuthMiddleware : IApiMiddleware
         var kept = (headers.Get("Cookie") ?? "").Split(';').Select(p => p.Trim()).Where(p => p != "" && p.Split('=', 2)[0] != name).ToList();
         kept.Add($"{name}={value}");
         headers.Set("Cookie", string.Join("; ", kept));
+    }
+
+    /// <summary>The auth settings of one send, read once; each scheme's value is resolved on first use and then kept.</summary>
+    private sealed class AuthSnapshot(ClientOptions options)
+    {
+        private readonly Dictionary<string, object?> _values = [];
+
+        public IAuthConfig? Config { get; } = options.AuthConfig;
+
+        public Func<ApiRequest, CallContext, CancellationToken, ValueTask>? CustomAuth { get; } = options.CustomAuth;
+
+        public string BaseUrl { get; } = options.BaseUrl;
+
+        public TimeSpan? Timeout { get; } = options.Timeout;
+
+        public object? Get(string scheme)
+        {
+            if (!_values.TryGetValue(scheme, out var value)) _values[scheme] = value = Config?.Get(scheme);
+            return value;
+        }
     }
 
     /// <summary>Compares HttpClients by reference.</summary>
