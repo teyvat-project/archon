@@ -10,7 +10,7 @@
   },
   "devDependencies": {
     "@natsuneko-laboratory/archon-e2e-mock-server": "workspace:*",
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "@natsuneko-laboratory/archon": "workspace:*",
     "jiti": "^2.7.0",
     "typescript": "^7.0.2",
