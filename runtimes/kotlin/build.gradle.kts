@@ -13,7 +13,7 @@ repositories {
 }
 
 dependencies {
-    api("io.ktor:ktor-client-core:3.6.0")
+    api("io.ktor:ktor-client-core:3.6.1")
     api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
 
     testImplementation(platform("org.junit:junit-bom:5.14.4"))
@@ -21,10 +21,10 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter-params")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
-    testImplementation("io.ktor:ktor-client-mock:3.6.0")
-    testImplementation("io.ktor:ktor-client-cio:3.6.0")
-    testImplementation("io.ktor:ktor-client-okhttp:3.6.0")
-    testImplementation("io.ktor:ktor-client-android:3.6.0")
+    testImplementation("io.ktor:ktor-client-mock:3.6.1")
+    testImplementation("io.ktor:ktor-client-cio:3.6.1")
+    testImplementation("io.ktor:ktor-client-okhttp:3.6.1")
+    testImplementation("io.ktor:ktor-client-android:3.6.1")
 }
 
 java {
