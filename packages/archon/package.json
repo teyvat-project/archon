@@ -54,7 +54,7 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@apidevtools/json-schema-ref-parser": "^16.0.5",
+    "@apidevtools/json-schema-ref-parser": "^16.0.8",
     "cac": "^7.1.0",
     "jiti": "^2.7.0",
     "yaml": "^2.9.1"
